@@ -1,4 +1,5 @@
 import os
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
@@ -60,6 +61,8 @@ class MainWindow(tk.Tk):
         self.dark_theme_enabled = tk.BooleanVar(value=False)
         self.menus = []
         self.toolbar_buttons = []
+        self.syllable_line_counts = []
+        self.syllable_count_pending = False
 
         self.create_widgets()
         self.create_menu()
@@ -98,6 +101,7 @@ class MainWindow(tk.Tk):
             ("Nouveau", self.new_file),
             ("Ouvrir", self.open_file),
             ("Sauver", self.save_file),
+            ("Syllabes", self.show_syllable_count),
         ]
         for label, command in actions:
             button = tk.Button(
@@ -141,21 +145,29 @@ class MainWindow(tk.Tk):
         self.scrollbar = tk.Scrollbar(self.editor_body, bd=0, width=14)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
+        self.syllable_gutter = tk.Canvas(
+            self.editor_body,
+            width=38,
+            bd=0,
+            highlightthickness=0,
+        )
+        self.syllable_gutter.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 6))
+
         self.text_edit = tk.Text(
             self.editor_body,
             wrap=tk.WORD,
             undo=True,
             bd=0,
-            padx=26,
+            padx=20,
             pady=24,
             font=("Georgia", 14),
             spacing1=3,
             spacing2=2,
             spacing3=9,
-            yscrollcommand=self.scrollbar.set,
+            yscrollcommand=self.on_text_scroll,
         )
         self.text_edit.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.scrollbar.config(command=self.text_edit.yview)
+        self.scrollbar.config(command=self.scroll_text)
 
         self.status_bar = tk.Frame(self.root_frame, bd=0, highlightthickness=0)
         self.status_bar.pack(fill=tk.X, padx=24, pady=(0, 18))
@@ -167,8 +179,10 @@ class MainWindow(tk.Tk):
         self.status_right.pack(side=tk.RIGHT)
 
         self.text_edit.bind("<<Modified>>", self.on_text_changed)
-        self.text_edit.bind("<KeyRelease>", lambda _event: self.update_status())
-        self.text_edit.bind("<ButtonRelease>", lambda _event: self.update_status())
+        self.text_edit.bind("<KeyRelease>", self.on_editor_navigation)
+        self.text_edit.bind("<ButtonRelease>", self.on_editor_navigation)
+        self.text_edit.bind("<Configure>", lambda _event: self.schedule_syllable_gutter_redraw())
+        self.text_edit.bind("<MouseWheel>", lambda _event: self.schedule_syllable_gutter_redraw(), add="+")
 
     def create_menu(self):
         self.menu = tk.Menu(self)
@@ -196,6 +210,12 @@ class MainWindow(tk.Tk):
             command=self.apply_theme,
         )
 
+        tools_menu = tk.Menu(self.menu, tearoff=False)
+        self.menu.add_cascade(label="Outils", menu=tools_menu)
+        self.menus.append(tools_menu)
+
+        tools_menu.add_command(label="Compter les syllabes", command=self.show_syllable_count)
+
     def bind_shortcuts(self):
         self.bind("<Control-n>", lambda _event: self.new_file())
         self.bind("<Control-o>", lambda _event: self.open_file())
@@ -206,6 +226,7 @@ class MainWindow(tk.Tk):
             self.text_edit.delete("1.0", tk.END)
             self.text_edit.edit_modified(False)
             self.editor_core = Editor()
+            self.clear_syllable_counts()
             self.update_window_title()
             self.update_status()
 
@@ -223,6 +244,7 @@ class MainWindow(tk.Tk):
             self.text_edit.delete("1.0", tk.END)
             self.text_edit.insert("1.0", content)
             self.text_edit.edit_modified(False)
+            self.clear_syllable_counts()
             self.update_window_title()
             self.update_status()
 
@@ -262,6 +284,7 @@ class MainWindow(tk.Tk):
     def on_text_changed(self, _event=None):
         if self.text_edit.edit_modified():
             self.editor_core.mark_modified()
+            self.clear_syllable_counts()
             self.update_window_title()
             self.update_status()
             self.text_edit.edit_modified(False)
@@ -302,6 +325,7 @@ class MainWindow(tk.Tk):
             selectbackground=theme["select_bg"],
             selectforeground=theme["select_fg"],
         )
+        self.syllable_gutter.configure(bg=theme["editor_bg"])
         self.menu.configure(
             bg=theme["menu_bg"],
             fg=theme["menu_fg"],
@@ -326,6 +350,8 @@ class MainWindow(tk.Tk):
                 selectcolor=theme["editor_bg"],
             )
 
+        self.redraw_syllable_gutter()
+
     def update_window_title(self):
         marker = "*" if self.editor_core.is_modified() else ""
 
@@ -346,6 +372,118 @@ class MainWindow(tk.Tk):
 
         self.status_left.configure(text=f"{words} mots   {chars} caracteres")
         self.status_right.configure(text=f"Ligne {line}, colonne {int(column) + 1}")
+
+    def show_syllable_count(self):
+        content = self.get_text_content()
+        self.syllable_count_pending = True
+        self.syllable_line_counts = []
+        self.redraw_syllable_gutter()
+
+        thread = threading.Thread(
+            target=self.calculate_syllable_count,
+            args=(content,),
+            daemon=True,
+        )
+        thread.start()
+
+    def calculate_syllable_count(self, content: str):
+        try:
+            line_counts = self.editor_core.count_line_syllables(content)
+            total = sum(line_counts)
+        except Exception as error:
+            error_message = str(error)
+            self.after(0, lambda: self.show_syllable_error(error_message))
+            return
+
+        self.after(0, lambda: self.display_syllable_count(content, total, line_counts))
+
+    def display_syllable_count(self, content: str, total: int, line_counts: list[int]):
+        self.syllable_count_pending = False
+        self.syllable_line_counts = line_counts
+        self.status_left.configure(text=f"Total: {total} syllabe{'s' if total > 1 else ''}")
+        self.redraw_syllable_gutter()
+
+    def show_syllable_error(self, error_message: str):
+        self.syllable_count_pending = False
+        self.syllable_line_counts = []
+        self.redraw_syllable_gutter()
+        messagebox.showerror("Syllabes", f"Impossible de compter les syllabes: {error_message}", parent=self)
+
+    def clear_syllable_counts(self):
+        self.syllable_count_pending = False
+        self.syllable_line_counts = []
+        self.redraw_syllable_gutter()
+
+    def on_editor_navigation(self, _event=None):
+        self.update_status()
+        self.schedule_syllable_gutter_redraw()
+
+    def on_text_scroll(self, first, last):
+        self.scrollbar.set(first, last)
+        self.schedule_syllable_gutter_redraw()
+
+    def scroll_text(self, *args):
+        self.text_edit.yview(*args)
+        self.schedule_syllable_gutter_redraw()
+
+    def schedule_syllable_gutter_redraw(self):
+        self.after_idle(self.redraw_syllable_gutter)
+
+    def redraw_syllable_gutter(self):
+        self.syllable_gutter.delete("all")
+
+        theme_name = "dark" if self.dark_theme_enabled.get() else "light"
+        theme = self.THEMES[theme_name]
+        fg = theme["muted_fg"]
+
+        if self.syllable_count_pending:
+            line_index = self.text_edit.index("@0,0").split(".")[0]
+            info = self.text_edit.dlineinfo(f"{line_index}.0")
+
+            if info:
+                _x, y, _width, height, _baseline = info
+                self.syllable_gutter.create_text(
+                    19,
+                    y + height // 2,
+                    text="...",
+                    fill=fg,
+                    font=("Segoe UI", 9, "bold"),
+                )
+
+            return
+
+        if not self.syllable_line_counts:
+            return
+
+        index = self.text_edit.index("@0,0")
+
+        while True:
+            line = int(index.split(".")[0])
+            info = self.text_edit.dlineinfo(f"{line}.0")
+
+            if info is None:
+                break
+
+            if line <= len(self.syllable_line_counts):
+                _x, y, _width, height, _baseline = info
+                count = self.syllable_line_counts[line - 1]
+                text = str(count) if count else ""
+
+                if text:
+                    self.syllable_gutter.create_text(
+                        19,
+                        y + height // 2,
+                        text=text,
+                        fill=fg,
+                        font=("Segoe UI", 9, "bold"),
+                    )
+
+            next_index = self.text_edit.index(f"{line + 1}.0")
+
+            if next_index == index:
+                break
+
+            index = next_index
 
     def confirm_unsaved_changes(self) -> bool:
         if not self.editor_core.is_modified():

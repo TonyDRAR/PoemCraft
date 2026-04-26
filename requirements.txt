@@ -1,0 +1,2 @@
+pylexique==1.5.1
+setuptools<81
