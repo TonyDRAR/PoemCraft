@@ -1,2 +1,6 @@
+# Runtime dependencies for Poetry Editor.
+#
+# tkinter is used for the desktop UI, but it is part of the Python
 pylexique==1.5.1
+# pylexique currently relies on behavior removed/changed in newer setuptools.
 setuptools<81
