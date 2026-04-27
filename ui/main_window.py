@@ -2,6 +2,7 @@ import os
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
+from tkinter import ttk
 
 from core.editor import Editor
 from services.file_service import FileService
@@ -27,6 +28,7 @@ class MainWindow(tk.Tk):
             "menu_fg": "#202124",
             "active_bg": "#e9eefb",
             "active_fg": "#202124",
+            "tree_selected_bg": "#dbe7ff",
         },
         "dark": {
             "window_bg": "#181a1f",
@@ -46,8 +48,13 @@ class MainWindow(tk.Tk):
             "menu_fg": "#eceff4",
             "active_bg": "#384152",
             "active_fg": "#ffffff",
+            "tree_selected_bg": "#334467",
         },
     }
+    TEXT_FILETYPES = (
+        ("Fichiers texte", "*.txt"),
+        ("Tous les fichiers", "*.*"),
+    )
 
     def __init__(self):
         super().__init__()
@@ -63,6 +70,8 @@ class MainWindow(tk.Tk):
         self.toolbar_buttons = []
         self.syllable_line_counts = []
         self.syllable_count_pending = False
+        self.current_folder = None
+        self.folder_tree_style_name = "Poetry.Treeview"
 
         self.create_widgets()
         self.create_menu()
@@ -100,6 +109,7 @@ class MainWindow(tk.Tk):
         actions = [
             ("Nouveau", self.new_file),
             ("Ouvrir", self.open_file),
+            ("Dossier", self.open_folder),
             ("Sauver", self.save_file),
             ("Syllabes", self.show_syllable_count),
         ]
@@ -117,8 +127,72 @@ class MainWindow(tk.Tk):
             button.pack(side=tk.LEFT, padx=(8, 0))
             self.toolbar_buttons.append(button)
 
-        self.editor_shell = tk.Frame(self.root_frame, bd=0, highlightthickness=1)
-        self.editor_shell.pack(fill=tk.BOTH, expand=True, padx=24, pady=18)
+        self.workspace = tk.PanedWindow(
+            self.root_frame,
+            orient=tk.HORIZONTAL,
+            bd=0,
+            sashwidth=6,
+            showhandle=False,
+        )
+        self.workspace.pack(fill=tk.BOTH, expand=True, padx=24, pady=18)
+
+        self.sidebar_shell = tk.Frame(self.workspace, bd=0, highlightthickness=1)
+        self.workspace.add(self.sidebar_shell, minsize=180, width=240)
+
+        self.sidebar_header = tk.Frame(self.sidebar_shell, bd=0, highlightthickness=0)
+        self.sidebar_header.pack(fill=tk.X, padx=12, pady=(12, 8))
+
+        self.sidebar_title = tk.Label(
+            self.sidebar_header,
+            text="Explorateur",
+            anchor="w",
+            font=("Segoe UI", 10, "bold"),
+        )
+        self.sidebar_title.pack(side=tk.LEFT)
+
+        self.folder_button = tk.Button(
+            self.sidebar_header,
+            text="Ouvrir",
+            command=self.open_folder,
+            bd=0,
+            padx=10,
+            pady=5,
+            cursor="hand2",
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.folder_button.pack(side=tk.RIGHT)
+        self.toolbar_buttons.append(self.folder_button)
+
+        self.folder_label = tk.Label(
+            self.sidebar_shell,
+            text="Aucun dossier ouvert",
+            anchor="w",
+            font=("Segoe UI", 8),
+        )
+        self.folder_label.pack(fill=tk.X, padx=12, pady=(0, 8))
+
+        self.tree_frame = tk.Frame(self.sidebar_shell, bd=0, highlightthickness=0)
+        self.tree_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
+        self.folder_tree = ttk.Treeview(
+            self.tree_frame,
+            columns=("path",),
+            displaycolumns=(),
+            show="tree",
+            selectmode="browse",
+            style=self.folder_tree_style_name,
+        )
+        self.folder_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.tree_scrollbar = tk.Scrollbar(self.tree_frame, bd=0, width=12)
+        self.tree_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.folder_tree.configure(yscrollcommand=self.tree_scrollbar.set)
+        self.tree_scrollbar.configure(command=self.folder_tree.yview)
+        self.folder_tree.bind("<<TreeviewOpen>>", self.on_tree_open)
+        self.folder_tree.bind("<Double-1>", self.open_selected_tree_file)
+
+        self.editor_shell = tk.Frame(self.workspace, bd=0, highlightthickness=1)
+        self.workspace.add(self.editor_shell, minsize=360)
 
         self.editor_header = tk.Frame(self.editor_shell, bd=0, highlightthickness=0)
         self.editor_header.pack(fill=tk.X, padx=18, pady=(14, 8))
@@ -194,6 +268,7 @@ class MainWindow(tk.Tk):
 
         file_menu.add_command(label="Nouveau", command=self.new_file, accelerator="Ctrl+N")
         file_menu.add_command(label="Ouvrir", command=self.open_file, accelerator="Ctrl+O")
+        file_menu.add_command(label="Ouvrir un dossier", command=self.open_folder, accelerator="Ctrl+K")
         file_menu.add_separator()
         file_menu.add_command(label="Sauvegarder", command=self.save_file, accelerator="Ctrl+S")
         file_menu.add_command(label="Sauvegarder sous", command=self.save_file_as)
@@ -220,6 +295,7 @@ class MainWindow(tk.Tk):
         self.bind("<Control-n>", lambda _event: self.new_file())
         self.bind("<Control-o>", lambda _event: self.open_file())
         self.bind("<Control-s>", lambda _event: self.save_file())
+        self.bind("<Control-k>", lambda _event: self.open_folder())
 
     def new_file(self):
         if self.confirm_unsaved_changes():
@@ -234,19 +310,13 @@ class MainWindow(tk.Tk):
         if not self.confirm_unsaved_changes():
             return
 
-        path = filedialog.askopenfilename(title="Ouvrir un fichier")
+        path = filedialog.askopenfilename(
+            title="Ouvrir un fichier",
+            filetypes=self.TEXT_FILETYPES,
+        )
 
         if path:
-            content = self.file_service.read(path)
-            self.editor_core.set_content(content)
-            self.editor_core.set_file_path(path)
-
-            self.text_edit.delete("1.0", tk.END)
-            self.text_edit.insert("1.0", content)
-            self.text_edit.edit_modified(False)
-            self.clear_syllable_counts()
-            self.update_window_title()
-            self.update_status()
+            self.load_file(path)
 
     def save_file(self):
         if not self.editor_core.has_file():
@@ -264,7 +334,11 @@ class MainWindow(tk.Tk):
         return success
 
     def save_file_as(self):
-        path = filedialog.asksaveasfilename(title="Sauvegarder sous")
+        path = filedialog.asksaveasfilename(
+            title="Sauvegarder sous",
+            defaultextension=".txt",
+            filetypes=self.TEXT_FILETYPES,
+        )
 
         if not path:
             return False
@@ -280,6 +354,88 @@ class MainWindow(tk.Tk):
             self.update_status()
 
         return success
+
+    def open_folder(self):
+        path = filedialog.askdirectory(title="Ouvrir un dossier")
+
+        if not path:
+            return
+
+        self.current_folder = path
+        self.folder_label.configure(text=path)
+        self.populate_folder_tree(path)
+
+    def populate_folder_tree(self, path: str):
+        self.folder_tree.delete(*self.folder_tree.get_children())
+        root_id = self.folder_tree.insert(
+            "",
+            tk.END,
+            text=os.path.basename(path) or path,
+            values=(path,),
+            open=True,
+        )
+        self.insert_folder_children(root_id, path)
+
+    def insert_folder_children(self, parent_id: str, path: str):
+        try:
+            entries = sorted(
+                os.scandir(path),
+                key=lambda entry: (not entry.is_dir(), entry.name.lower()),
+            )
+        except OSError:
+            return
+
+        for entry in entries:
+            if entry.name.startswith("."):
+                continue
+
+            label = entry.name
+            item_id = self.folder_tree.insert(parent_id, tk.END, text=label, values=(entry.path,))
+
+            if entry.is_dir():
+                self.folder_tree.insert(item_id, tk.END, text="Chargement...", values=("",))
+
+    def on_tree_open(self, _event=None):
+        item_id = self.folder_tree.focus()
+        path = self.get_tree_item_path(item_id)
+
+        if not path or not os.path.isdir(path):
+            return
+
+        children = self.folder_tree.get_children(item_id)
+
+        if len(children) == 1 and not self.get_tree_item_path(children[0]):
+            self.folder_tree.delete(children[0])
+            self.insert_folder_children(item_id, path)
+
+    def open_selected_tree_file(self, _event=None):
+        item_id = self.folder_tree.focus()
+        path = self.get_tree_item_path(item_id)
+
+        if not path or os.path.isdir(path):
+            return
+
+        if self.confirm_unsaved_changes():
+            self.load_file(path)
+
+    def get_tree_item_path(self, item_id: str) -> str:
+        if not item_id:
+            return ""
+
+        values = self.folder_tree.item(item_id, "values")
+        return values[0] if values else ""
+
+    def load_file(self, path: str):
+        content = self.file_service.read(path)
+        self.editor_core.set_content(content)
+        self.editor_core.set_file_path(path)
+
+        self.text_edit.delete("1.0", tk.END)
+        self.text_edit.insert("1.0", content)
+        self.text_edit.edit_modified(False)
+        self.clear_syllable_counts()
+        self.update_window_title()
+        self.update_status()
 
     def on_text_changed(self, _event=None):
         if self.text_edit.edit_modified():
@@ -299,6 +455,22 @@ class MainWindow(tk.Tk):
         self.title_block.configure(bg=theme["window_bg"])
         self.app_title.configure(bg=theme["window_bg"], fg=theme["editor_fg"])
         self.file_label.configure(bg=theme["window_bg"], fg=theme["muted_fg"])
+        self.workspace.configure(bg=theme["window_bg"])
+
+        self.sidebar_shell.configure(
+            bg=theme["surface_bg"],
+            highlightbackground=theme["surface_border"],
+            highlightcolor=theme["surface_border"],
+        )
+        self.sidebar_header.configure(bg=theme["surface_bg"])
+        self.sidebar_title.configure(bg=theme["surface_bg"], fg=theme["editor_fg"])
+        self.folder_label.configure(bg=theme["surface_bg"], fg=theme["muted_fg"])
+        self.tree_frame.configure(bg=theme["surface_bg"])
+        self.tree_scrollbar.configure(
+            bg=theme["menu_bg"],
+            activebackground=theme["active_bg"],
+            troughcolor=theme["surface_bg"],
+        )
 
         self.editor_shell.configure(
             bg=theme["surface_bg"],
@@ -331,6 +503,21 @@ class MainWindow(tk.Tk):
             fg=theme["menu_fg"],
             activebackground=theme["active_bg"],
             activeforeground=theme["active_fg"],
+        )
+
+        ttk.Style(self).configure(
+            self.folder_tree_style_name,
+            background=theme["surface_bg"],
+            foreground=theme["editor_fg"],
+            fieldbackground=theme["surface_bg"],
+            borderwidth=0,
+            rowheight=24,
+            font=("Segoe UI", 9),
+        )
+        ttk.Style(self).map(
+            self.folder_tree_style_name,
+            background=[("selected", theme["tree_selected_bg"])],
+            foreground=[("selected", theme["editor_fg"])],
         )
 
         for button in self.toolbar_buttons:
