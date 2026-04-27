@@ -1,19 +1,30 @@
 ✨ PoemCraft
 
+<<<<<<< HEAD
 PoemCraft is a simple tool to write and manage poems. It helps you create, analyze, and organize your poetry in one place.
 
 🚀 Features
 
+=======
+PoemCraft is a simple tool to write and manage poems.
+It helps you create, analyze, and organize your poetry in one place.
+
+🚀 Features
+>>>>>>> e37abe328a0c29bf8f47bfc4c556cc04af538832
 - Write poems easily
 - Count syllables automatically
 - Save your poems
 
 🔮 Coming soon
+<<<<<<< HEAD
 
+=======
+>>>>>>> e37abe328a0c29bf8f47bfc4c556cc04af538832
 - Synonym suggestions
 - Rhyme finder
 - Custom writing ruleset
 - Typing objectives
+<<<<<<< HEAD
 
 ## Installation
 
@@ -46,3 +57,5 @@ On Linux, if the app fails to open because `tkinter` is missing, install it with
 ```bash
 sudo apt install python3-tk
 ```
+=======
+>>>>>>> e37abe328a0c29bf8f47bfc4c556cc04af538832
