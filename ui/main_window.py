@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 from tkinter import ttk
@@ -10,6 +11,7 @@ from PIL import Image, ImageTk
 
 from core.editor import Editor
 from services.file_service import FileService
+from services.pollinations_service import PollinationsService
 
 
 class MainWindow(tk.Tk):
@@ -63,10 +65,6 @@ class MainWindow(tk.Tk):
         ("Fichiers texte", "*.txt"),
         ("Tous les fichiers", "*.*"),
     )
-    IMAGE_FILETYPES = (
-        ("Images", "*.png *.jpg *.jpeg *.webp *.bmp *.gif"),
-        ("Tous les fichiers", "*.*"),
-    )
     IMAGE_METADATA_FILENAME = ".poetry_editor_images.json"
     IMAGE_ASSETS_FOLDER = ".poetry_editor_assets"
     SETTINGS_FILENAME = "settings.json"
@@ -80,6 +78,7 @@ class MainWindow(tk.Tk):
 
         self.editor_core = Editor()
         self.file_service = FileService()
+        self.pollinations_service = PollinationsService()
         self.app_settings = self.load_app_settings()
         self.dark_theme_enabled = tk.BooleanVar(value=bool(self.app_settings.get("dark_theme_enabled", False)))
         self.menus = []
@@ -89,6 +88,9 @@ class MainWindow(tk.Tk):
         self.current_folder = None
         self.current_image_path = None
         self.image_preview = None
+        self.image_generation_pending = False
+        self.image_generation_id = 0
+        self.generate_image_button = None
         self.folder_tree_style_name = "Poetry.Treeview"
         self.scrollbar_style_name = "Poetry.Vertical.TScrollbar"
         self.ui_style = ttk.Style(self)
@@ -256,7 +258,7 @@ class MainWindow(tk.Tk):
         self.editor_tools.pack(side=tk.RIGHT, padx=(12, 0))
 
         editor_actions = [
-            ("Image", self.import_image_for_current_file),
+            ("Image IA", self.import_image_for_current_file),
         ]
 
         for label, command in editor_actions:
@@ -272,6 +274,8 @@ class MainWindow(tk.Tk):
             )
             button.pack(side=tk.LEFT, padx=(0, 6))
             self.toolbar_buttons.append(button)
+            if label == "Image IA":
+                self.generate_image_button = button
 
         self.hint_label = tk.Label(
             self.editor_header,
@@ -625,32 +629,113 @@ class MainWindow(tk.Tk):
         self.save_app_settings()
 
     def import_image_for_current_file(self):
+        if self.image_generation_pending:
+            return
+
+        poem = self.get_text_content().strip()
+
+        if not poem:
+            messagebox.showinfo("Image IA", "Ecrivez un poeme avant de generer une image.", parent=self)
+            return
+
         if not self.editor_core.has_file():
             if not self.save_file_as():
                 return
 
-        image_path = filedialog.askopenfilename(
-            title="Importer une image",
-            filetypes=self.IMAGE_FILETYPES,
-        )
+        text_path = self.editor_core.file_path
+        prompt = self.build_image_generation_prompt(poem)
+        destination_path = self.get_generated_image_path(text_path)
+        self.image_generation_id += 1
+        generation_id = self.image_generation_id
 
-        if not image_path:
-            return
+        self.set_image_generation_state(True)
+        self.after(45000, lambda: self.cancel_stalled_image_generation(generation_id))
+
+        thread = threading.Thread(
+            target=self.generate_image_for_file,
+            args=(generation_id, text_path, prompt, destination_path),
+            daemon=True,
+        )
+        thread.start()
+
+    def generate_image_for_file(self, generation_id: int, text_path: str, prompt: str, destination_path: str):
+        error_message = ""
 
         try:
-            stored_image_path = self.copy_image_to_text_assets(image_path)
-            metadata = self.read_image_metadata(self.editor_core.file_path)
-            metadata[os.path.basename(self.editor_core.file_path)] = os.path.relpath(
-                stored_image_path,
-                os.path.dirname(self.editor_core.file_path),
-            )
-            self.write_image_metadata(self.editor_core.file_path, metadata)
-        except OSError as error:
-            messagebox.showerror("Image", f"Impossible d'importer l'image: {error}", parent=self)
+            self.pollinations_service.generate_image(prompt, destination_path)
+
+            metadata = self.read_image_metadata(text_path)
+            metadata[os.path.basename(text_path)] = os.path.relpath(destination_path, os.path.dirname(text_path))
+            self.write_image_metadata(text_path, metadata)
+        except Exception as error:
+            error_message = str(error)
+
+        self.after(
+            0,
+            lambda: self.finish_image_generation(generation_id, text_path, destination_path, error_message),
+        )
+
+    def finish_image_generation(
+        self,
+        generation_id: int,
+        text_path: str,
+        destination_path: str,
+        error_message: str,
+    ):
+        if generation_id != self.image_generation_id:
             return
 
-        self.current_image_path = stored_image_path
+        self.set_image_generation_state(False)
+
+        if error_message:
+            messagebox.showerror("Image IA", f"Impossible de generer l'image: {error_message}", parent=self)
+            return
+
+        if self.editor_core.file_path != text_path:
+            return
+
+        self.current_image_path = destination_path
         self.display_current_image()
+
+    def cancel_stalled_image_generation(self, generation_id: int):
+        if not self.image_generation_pending or generation_id != self.image_generation_id:
+            return
+
+        self.image_generation_id += 1
+        self.set_image_generation_state(False)
+        messagebox.showerror(
+            "Image IA",
+            "La generation prend trop de temps. Reessayez dans quelques instants.",
+            parent=self,
+        )
+
+    def set_image_generation_state(self, is_pending: bool):
+        self.image_generation_pending = is_pending
+
+        if self.generate_image_button is not None:
+            self.generate_image_button.configure(
+                text="Generation...",
+                state=tk.DISABLED,
+            )
+
+            if not is_pending:
+                self.generate_image_button.configure(
+                    text="Image IA",
+                    state=tk.NORMAL,
+                )
+
+        if is_pending:
+            self.status_left.configure(text="Generation de l'image IA en cours...")
+        else:
+            self.update_status()
+
+    def build_image_generation_prompt(self, poem: str) -> str:
+        poem_excerpt = " ".join(poem.split())[:1200]
+        return (
+            "Poetic book illustration inspired by this poem, expressive, atmospheric, painterly, "
+            "high detail, harmonious composition, no visible text. Poem: "
+            f"{poem_excerpt}"
+        )
 
     def remove_image_from_current_file(self):
         if not self.editor_core.has_file():
@@ -673,20 +758,12 @@ class MainWindow(tk.Tk):
         if image_path and os.path.exists(image_path):
             os.remove(image_path)
 
-    def copy_image_to_text_assets(self, source_path: str) -> str:
-        text_path = self.editor_core.file_path
+    def get_generated_image_path(self, text_path: str) -> str:
         text_folder = os.path.dirname(text_path)
         text_name = os.path.splitext(os.path.basename(text_path))[0]
-        source_extension = os.path.splitext(source_path)[1].lower() or ".png"
+        timestamp = int(time.time() * 1000)
         assets_folder = os.path.join(text_folder, self.IMAGE_ASSETS_FOLDER)
-        os.makedirs(assets_folder, exist_ok=True)
-
-        destination_path = os.path.join(assets_folder, f"{text_name}{source_extension}")
-
-        if os.path.normcase(os.path.abspath(source_path)) != os.path.normcase(os.path.abspath(destination_path)):
-            shutil.copy2(source_path, destination_path)
-
-        return destination_path
+        return os.path.join(assets_folder, f"{text_name}_generated_{timestamp}.jpg")
 
     def read_image_metadata(self, text_path: str) -> dict[str, str]:
         metadata_path = self.get_image_metadata_path(text_path)
