@@ -18,6 +18,12 @@ class MainWindow(tk.Tk):
     THEMES = {
         "light": {
             "window_bg": "#eef0f4",
+            "chrome_bg": "#f7f8fb",
+            "chrome_border": "#dfe3eb",
+            "chrome_mark_bg": "#202124",
+            "chrome_mark_fg": "#ffffff",
+            "chrome_button_hover": "#e8edf6",
+            "chrome_close_hover": "#d94b4b",
             "surface_bg": "#ffffff",
             "surface_border": "#d7dbe3",
             "toolbar_bg": "#f8f9fb",
@@ -40,6 +46,12 @@ class MainWindow(tk.Tk):
         },
         "dark": {
             "window_bg": "#181a1f",
+            "chrome_bg": "#111318",
+            "chrome_border": "#2c313b",
+            "chrome_mark_bg": "#eceff4",
+            "chrome_mark_fg": "#15171c",
+            "chrome_button_hover": "#2b3039",
+            "chrome_close_hover": "#b84040",
             "surface_bg": "#22252c",
             "surface_border": "#333844",
             "toolbar_bg": "#20232a",
@@ -75,6 +87,7 @@ class MainWindow(tk.Tk):
         self.title("Mon Editeur")
         self.geometry("980x680")
         self.minsize(720, 480)
+        self.overrideredirect(True)
 
         self.editor_core = Editor()
         self.file_service = FileService()
@@ -83,6 +96,8 @@ class MainWindow(tk.Tk):
         self.dark_theme_enabled = tk.BooleanVar(value=bool(self.app_settings.get("dark_theme_enabled", False)))
         self.menus = []
         self.toolbar_buttons = []
+        self.window_control_buttons = []
+        self.resize_grips = []
         self.syllable_line_counts = []
         self.syllable_count_pending = False
         self.current_folder = None
@@ -91,6 +106,18 @@ class MainWindow(tk.Tk):
         self.image_generation_pending = False
         self.image_generation_id = 0
         self.generate_image_button = None
+        self.is_maximized = False
+        self.restore_geometry = ""
+        self.drag_offset_x = 0
+        self.drag_offset_y = 0
+        self.resize_start_width = 0
+        self.resize_start_height = 0
+        self.resize_start_x = 0
+        self.resize_start_y = 0
+        self.resize_start_window_x = 0
+        self.resize_start_window_y = 0
+        self.resize_direction = ""
+        self.resize_margin = 7
         self.folder_tree_style_name = "Poetry.Treeview"
         self.scrollbar_style_name = "Poetry.Vertical.TScrollbar"
         self.ui_style = ttk.Style(self)
@@ -106,14 +133,75 @@ class MainWindow(tk.Tk):
         self.bind_shortcuts()
         self.restore_session()
         self.update_status()
+        self.bind("<Map>", self.restore_custom_window_chrome)
         self.protocol("WM_DELETE_WINDOW", self.close_window)
 
     def create_widgets(self):
         self.root_frame = tk.Frame(self, bd=0, highlightthickness=0)
         self.root_frame.pack(fill=tk.BOTH, expand=True)
 
+        self.window_chrome = tk.Frame(self.root_frame, bd=0, highlightthickness=0, height=46)
+        self.window_chrome.pack(fill=tk.X)
+        self.window_chrome.pack_propagate(False)
+
+        self.window_title_area = tk.Frame(self.window_chrome, bd=0, highlightthickness=0)
+        self.window_title_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(18, 8))
+
+        self.app_mark = tk.Label(
+            self.window_title_area,
+            text="P",
+            anchor="center",
+            font=("Segoe UI", 10, "bold"),
+            width=3,
+        )
+        self.app_mark.pack(side=tk.LEFT, pady=10)
+
+        self.window_text_block = tk.Frame(self.window_title_area, bd=0, highlightthickness=0)
+        self.window_text_block.pack(side=tk.LEFT, padx=(10, 0), pady=13)
+
+        self.window_app_name = tk.Label(
+            self.window_text_block,
+            text="PoemCraft",
+            anchor="w",
+            font=("Segoe UI", 10, "bold"),
+        )
+        self.window_app_name.pack(anchor="w")
+
+        self.window_actions = tk.Frame(self.window_chrome, bd=0, highlightthickness=0)
+        self.window_actions.pack(side=tk.RIGHT, fill=tk.Y)
+
+        window_actions = [
+            ("-", self.minimize_window),
+            ("□", self.toggle_maximize_window),
+            ("×", self.close_window),
+        ]
+
+        for label, command in window_actions:
+            button = tk.Button(
+                self.window_actions,
+                text=label,
+                command=command,
+                bd=0,
+                width=5,
+                cursor="hand2",
+                font=("Segoe UI", 11, "bold"),
+            )
+            button.pack(side=tk.LEFT, fill=tk.Y)
+            self.window_control_buttons.append(button)
+
+        for widget in (
+            self.window_chrome,
+            self.window_title_area,
+            self.app_mark,
+            self.window_text_block,
+            self.window_app_name,
+        ):
+            widget.bind("<Button-1>", self.start_window_drag)
+            widget.bind("<B1-Motion>", self.drag_window)
+            widget.bind("<Double-Button-1>", lambda _event: self.toggle_maximize_window())
+
         self.toolbar = tk.Frame(self.root_frame, bd=0, highlightthickness=0)
-        self.toolbar.pack(fill=tk.X, padx=24, pady=(20, 0))
+        self.toolbar.pack(fill=tk.X, padx=24, pady=(14, 0))
 
         self.title_block = tk.Frame(self.toolbar, bd=0, highlightthickness=0)
         self.title_block.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -363,6 +451,7 @@ class MainWindow(tk.Tk):
         self.text_edit.bind("<ButtonRelease>", self.on_editor_navigation)
         self.text_edit.bind("<Configure>", lambda _event: self.schedule_syllable_gutter_redraw())
         self.text_edit.bind("<MouseWheel>", lambda _event: self.schedule_syllable_gutter_redraw(), add="+")
+        self.create_resize_grips()
 
     def create_context_menus(self):
         self.explorer_context_menu = tk.Menu(self, tearoff=False)
@@ -372,11 +461,160 @@ class MainWindow(tk.Tk):
         self.explorer_context_menu.add_separator()
         self.explorer_context_menu.add_command(label="Supprimer", command=self.delete_selected_explorer_item)
 
+    def create_resize_grips(self):
+        grip_specs = [
+            ("n", {"x": 0, "y": 0, "relwidth": 1, "height": self.resize_margin}, "size_ns"),
+            ("s", {"x": 0, "rely": 1, "relwidth": 1, "height": self.resize_margin, "anchor": "sw"}, "size_ns"),
+            ("w", {"x": 0, "y": 0, "width": self.resize_margin, "relheight": 1}, "size_we"),
+            ("e", {"relx": 1, "y": 0, "width": self.resize_margin, "relheight": 1, "anchor": "ne"}, "size_we"),
+            ("nw", {"x": 0, "y": 0, "width": self.resize_margin * 2, "height": self.resize_margin * 2}, "size_nw_se"),
+            (
+                "ne",
+                {
+                    "relx": 1,
+                    "y": 0,
+                    "width": self.resize_margin * 2,
+                    "height": self.resize_margin * 2,
+                    "anchor": "ne",
+                },
+                "size_ne_sw",
+            ),
+            (
+                "sw",
+                {
+                    "x": 0,
+                    "rely": 1,
+                    "width": self.resize_margin * 2,
+                    "height": self.resize_margin * 2,
+                    "anchor": "sw",
+                },
+                "size_ne_sw",
+            ),
+            (
+                "se",
+                {
+                    "relx": 1,
+                    "rely": 1,
+                    "width": self.resize_margin * 2,
+                    "height": self.resize_margin * 2,
+                    "anchor": "se",
+                },
+                "size_nw_se",
+            ),
+        ]
+
+        for direction, place_options, cursor in grip_specs:
+            grip = tk.Frame(self.root_frame, bd=0, highlightthickness=0, cursor=cursor)
+            grip.place(**place_options)
+            grip.bind("<Button-1>", lambda event, resize_direction=direction: self.start_window_resize(event, resize_direction))
+            grip.bind("<B1-Motion>", self.resize_window)
+            grip.bind("<ButtonRelease-1>", self.stop_window_resize)
+            grip.lift()
+            self.resize_grips.append(grip)
+
     def bind_shortcuts(self):
         self.bind("<Control-n>", lambda _event: self.new_file())
         self.bind("<Control-o>", lambda _event: self.open_file())
         self.bind("<Control-s>", lambda _event: self.save_file())
         self.bind("<Control-k>", lambda _event: self.open_folder())
+
+    def restore_custom_window_chrome(self, _event=None):
+        if self.state() == "normal":
+            self.after(10, lambda: self.overrideredirect(True))
+
+    def start_window_drag(self, event):
+        if self.is_maximized or self.get_resize_direction(event):
+            return
+
+        self.drag_offset_x = event.x_root - self.winfo_x()
+        self.drag_offset_y = event.y_root - self.winfo_y()
+
+    def drag_window(self, event):
+        if self.is_maximized:
+            return
+
+        next_x = event.x_root - self.drag_offset_x
+        next_y = event.y_root - self.drag_offset_y
+        self.geometry(f"+{next_x}+{next_y}")
+
+    def get_resize_direction(self, event) -> str:
+        if self.is_maximized:
+            return ""
+
+        pointer_x = event.x_root - self.winfo_rootx()
+        pointer_y = event.y_root - self.winfo_rooty()
+        width = self.winfo_width()
+        height = self.winfo_height()
+
+        near_left = pointer_x <= self.resize_margin
+        near_right = pointer_x >= width - self.resize_margin
+        near_top = pointer_y <= self.resize_margin
+        near_bottom = pointer_y >= height - self.resize_margin
+
+        vertical = "n" if near_top else "s" if near_bottom else ""
+        horizontal = "w" if near_left else "e" if near_right else ""
+
+        return f"{vertical}{horizontal}"
+
+    def start_window_resize(self, event, direction: str):
+        if not direction or self.is_maximized:
+            return
+
+        self.resize_direction = direction
+        self.resize_start_width = self.winfo_width()
+        self.resize_start_height = self.winfo_height()
+        self.resize_start_window_x = self.winfo_x()
+        self.resize_start_window_y = self.winfo_y()
+        self.resize_start_x = event.x_root
+        self.resize_start_y = event.y_root
+
+    def resize_window(self, event):
+        if not self.resize_direction:
+            return
+
+        min_width, min_height = self.minsize()
+        delta_x = event.x_root - self.resize_start_x
+        delta_y = event.y_root - self.resize_start_y
+        next_x = self.resize_start_window_x
+        next_y = self.resize_start_window_y
+        next_width = self.resize_start_width
+        next_height = self.resize_start_height
+
+        if "e" in self.resize_direction:
+            next_width = max(min_width, self.resize_start_width + delta_x)
+
+        if "s" in self.resize_direction:
+            next_height = max(min_height, self.resize_start_height + delta_y)
+
+        if "w" in self.resize_direction:
+            requested_width = self.resize_start_width - delta_x
+            next_width = max(min_width, requested_width)
+            next_x = self.resize_start_window_x + self.resize_start_width - next_width
+
+        if "n" in self.resize_direction:
+            requested_height = self.resize_start_height - delta_y
+            next_height = max(min_height, requested_height)
+            next_y = self.resize_start_window_y + self.resize_start_height - next_height
+
+        self.geometry(f"{next_width}x{next_height}+{next_x}+{next_y}")
+
+    def stop_window_resize(self, _event=None):
+        self.resize_direction = ""
+
+    def minimize_window(self):
+        self.overrideredirect(False)
+        self.iconify()
+
+    def toggle_maximize_window(self):
+        if self.is_maximized:
+            if self.restore_geometry:
+                self.geometry(self.restore_geometry)
+            self.is_maximized = False
+            return
+
+        self.restore_geometry = self.geometry()
+        self.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
+        self.is_maximized = True
 
     def toggle_theme(self):
         self.dark_theme_enabled.set(not self.dark_theme_enabled.get())
@@ -1074,6 +1312,14 @@ class MainWindow(tk.Tk):
 
         self.configure(bg=theme["window_bg"])
         self.root_frame.configure(bg=theme["window_bg"])
+        self.window_chrome.configure(bg=theme["chrome_bg"], highlightthickness=1, highlightbackground=theme["chrome_border"])
+        self.window_title_area.configure(bg=theme["chrome_bg"])
+        self.app_mark.configure(bg=theme["chrome_mark_bg"], fg=theme["chrome_mark_fg"])
+        self.window_text_block.configure(bg=theme["chrome_bg"])
+        self.window_app_name.configure(bg=theme["chrome_bg"], fg=theme["editor_fg"])
+        self.window_actions.configure(bg=theme["chrome_bg"])
+        for grip in self.resize_grips:
+            grip.configure(bg=theme["window_bg"])
         self.toolbar.configure(bg=theme["window_bg"])
         self.title_block.configure(bg=theme["window_bg"])
         self.app_title.configure(bg=theme["window_bg"], fg=theme["editor_fg"])
@@ -1155,6 +1401,16 @@ class MainWindow(tk.Tk):
                 fg=theme["button_fg"],
                 activebackground=theme["button_active_bg"],
                 activeforeground=theme["button_fg"],
+            )
+
+        for index, button in enumerate(self.window_control_buttons):
+            active_bg = theme["chrome_close_hover"] if index == 2 else theme["chrome_button_hover"]
+            active_fg = "#ffffff" if index == 2 else theme["editor_fg"]
+            button.configure(
+                bg=theme["chrome_bg"],
+                fg=theme["editor_fg"],
+                activebackground=active_bg,
+                activeforeground=active_fg,
             )
 
         for menu in self.menus:
