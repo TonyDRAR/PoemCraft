@@ -15,6 +15,7 @@ METRIC_RULES = {
     "Octosyllabe 8": [8],
     "Haiku 5/7/5": [5, 7, 5],
 }
+RHYME_LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 
 class Editor:
@@ -90,6 +91,76 @@ class Editor:
 
         matching_lines = sum(1 for count, target in checked_lines if count == target)
         return matching_lines, len(checked_lines)
+
+    @staticmethod
+    def get_line_rhyme_labels(text: str) -> list[str]:
+        rhyme_keys: dict[str, str] = {}
+        next_label_index = 0
+        labels = []
+
+        for line in text.splitlines():
+            key = Editor.get_line_rhyme_key(line)
+
+            if not key:
+                labels.append("")
+                continue
+
+            if key not in rhyme_keys:
+                rhyme_keys[key] = Editor.build_rhyme_label(next_label_index)
+                next_label_index += 1
+
+            labels.append(rhyme_keys[key])
+
+        return labels
+
+    @staticmethod
+    def get_rhyme_scheme(labels: list[str]) -> str:
+        return " ".join(label for label in labels if label)
+
+    @staticmethod
+    def get_line_rhyme_key(line: str) -> str:
+        words = WORD_RE.findall(line)
+
+        if not words:
+            return ""
+
+        return Editor.get_word_rhyme_key(words[-1])
+
+    @staticmethod
+    def get_word_rhyme_key(word: str) -> str:
+        word = Editor.remove_accents(Editor.normalize_word(word))
+
+        if not word:
+            return ""
+
+        if len(word) > 3:
+            word = re.sub(r"(?<=[^aeiouy])(?:e|es|ent)$", "", word)
+
+        groups = list(VOWEL_GROUP_RE.finditer(word))
+
+        if not groups:
+            return word[-3:]
+
+        start = groups[-1].start()
+
+        if len(groups[-1].group()) == 1 and start > 0 and groups[-1].group() in "e":
+            previous_groups = groups[:-1]
+
+            if previous_groups:
+                start = previous_groups[-1].start()
+
+        return word[start:]
+
+    @staticmethod
+    def build_rhyme_label(index: int) -> str:
+        label = ""
+        index += 1
+
+        while index:
+            index, remainder = divmod(index - 1, len(RHYME_LABELS))
+            label = RHYME_LABELS[remainder] + label
+
+        return label
 
     @staticmethod
     def count_verse_syllables(line: str) -> int:

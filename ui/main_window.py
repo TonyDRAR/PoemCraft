@@ -45,6 +45,7 @@ class MainWindow(tk.Tk):
             "scrollbar_active_bg": "#b8bfcc",
             "metric_ok_fg": "#1f8a4c",
             "metric_error_fg": "#d14a32",
+            "rhyme_palette": ("#2f6fed", "#b2569d", "#c67a00", "#1f8a4c", "#7c5fb8", "#168a8a"),
         },
         "dark": {
             "window_bg": "#181a1f",
@@ -75,6 +76,7 @@ class MainWindow(tk.Tk):
             "scrollbar_active_bg": "#505a6b",
             "metric_ok_fg": "#74c98f",
             "metric_error_fg": "#ff8a74",
+            "rhyme_palette": ("#82aaff", "#f29fca", "#ffc46b", "#74c98f", "#b7a4ff", "#6fd6d6"),
         },
     }
     TEXT_FILETYPES = (
@@ -105,6 +107,7 @@ class MainWindow(tk.Tk):
         self.resize_grips = []
         self.syllable_line_counts = []
         self.syllable_line_targets = []
+        self.rhyme_line_labels = []
         self.syllable_count_pending = False
         self.current_folder = None
         self.current_image_path = None
@@ -347,6 +350,19 @@ class MainWindow(tk.Tk):
         )
         self.syllables_button.pack(anchor="w", pady=(6, 0))
         self.toolbar_buttons.append(self.syllables_button)
+
+        self.rhymes_button = tk.Button(
+            self.editor_title_block,
+            text="Rimes",
+            command=self.show_rhyme_scheme,
+            bd=0,
+            padx=10,
+            pady=6,
+            cursor="hand2",
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.rhymes_button.pack(anchor="w", pady=(6, 0))
+        self.toolbar_buttons.append(self.rhymes_button)
 
         self.metric_frame = tk.Frame(self.editor_title_block, bd=0, highlightthickness=0)
         self.metric_frame.pack(anchor="w", pady=(6, 0))
@@ -1492,6 +1508,7 @@ class MainWindow(tk.Tk):
         self.syllable_count_pending = True
         self.syllable_line_counts = []
         self.syllable_line_targets = []
+        self.rhyme_line_labels = []
         self.redraw_syllable_gutter()
 
         thread = threading.Thread(
@@ -1533,6 +1550,22 @@ class MainWindow(tk.Tk):
         self.syllable_count_pending = False
         self.syllable_line_counts = []
         self.syllable_line_targets = []
+        self.rhyme_line_labels = []
+        self.redraw_syllable_gutter()
+
+    def show_rhyme_scheme(self):
+        content = self.get_text_content()
+        self.syllable_count_pending = False
+        self.syllable_line_counts = []
+        self.syllable_line_targets = []
+        self.rhyme_line_labels = self.editor_core.get_line_rhyme_labels(content)
+        scheme = self.editor_core.get_rhyme_scheme(self.rhyme_line_labels)
+
+        if scheme:
+            self.status_left.configure(text=f"Schema de rimes: {scheme}")
+        else:
+            self.status_left.configure(text="Aucune rime detectee")
+
         self.redraw_syllable_gutter()
 
     def on_metric_objective_changed(self, _event=None):
@@ -1598,6 +1631,10 @@ class MainWindow(tk.Tk):
 
             return
 
+        if self.rhyme_line_labels:
+            self.redraw_rhyme_gutter(theme)
+            return
+
         if not self.syllable_line_counts:
             return
 
@@ -1635,6 +1672,46 @@ class MainWindow(tk.Tk):
                 break
 
             index = next_index
+
+    def redraw_rhyme_gutter(self, theme: dict):
+        index = self.text_edit.index("@0,0")
+        palette = theme["rhyme_palette"]
+
+        while True:
+            line = int(index.split(".")[0])
+            info = self.text_edit.dlineinfo(f"{line}.0")
+
+            if info is None:
+                break
+
+            if line <= len(self.rhyme_line_labels):
+                _x, y, _width, height, _baseline = info
+                label = self.rhyme_line_labels[line - 1]
+
+                if label:
+                    color_index = self.get_rhyme_color_index(label)
+                    self.syllable_gutter.create_text(
+                        19,
+                        y + height // 2,
+                        text=label,
+                        fill=palette[color_index % len(palette)],
+                        font=("Segoe UI", 9, "bold"),
+                    )
+
+            next_index = self.text_edit.index(f"{line + 1}.0")
+
+            if next_index == index:
+                break
+
+            index = next_index
+
+    def get_rhyme_color_index(self, label: str) -> int:
+        color_index = 0
+
+        for char in label:
+            color_index = color_index * 26 + (ord(char) - ord("A") + 1)
+
+        return max(0, color_index - 1)
 
     def confirm_unsaved_changes(self) -> bool:
         if not self.editor_core.is_modified():
