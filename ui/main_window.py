@@ -43,6 +43,8 @@ class MainWindow(tk.Tk):
             "tree_selected_bg": "#dbe7ff",
             "scrollbar_bg": "#d7dbe3",
             "scrollbar_active_bg": "#b8bfcc",
+            "metric_ok_fg": "#1f8a4c",
+            "metric_error_fg": "#d14a32",
         },
         "dark": {
             "window_bg": "#181a1f",
@@ -71,6 +73,8 @@ class MainWindow(tk.Tk):
             "tree_selected_bg": "#334467",
             "scrollbar_bg": "#3a404c",
             "scrollbar_active_bg": "#505a6b",
+            "metric_ok_fg": "#74c98f",
+            "metric_error_fg": "#ff8a74",
         },
     }
     TEXT_FILETYPES = (
@@ -94,11 +98,13 @@ class MainWindow(tk.Tk):
         self.pollinations_service = PollinationsService()
         self.app_settings = self.load_app_settings()
         self.dark_theme_enabled = tk.BooleanVar(value=bool(self.app_settings.get("dark_theme_enabled", False)))
+        self.metric_objective = tk.StringVar(value=self.get_saved_metric_objective())
         self.menus = []
         self.toolbar_buttons = []
         self.window_control_buttons = []
         self.resize_grips = []
         self.syllable_line_counts = []
+        self.syllable_line_targets = []
         self.syllable_count_pending = False
         self.current_folder = None
         self.current_image_path = None
@@ -341,6 +347,27 @@ class MainWindow(tk.Tk):
         )
         self.syllables_button.pack(anchor="w", pady=(6, 0))
         self.toolbar_buttons.append(self.syllables_button)
+
+        self.metric_frame = tk.Frame(self.editor_title_block, bd=0, highlightthickness=0)
+        self.metric_frame.pack(anchor="w", pady=(6, 0))
+
+        self.metric_label = tk.Label(
+            self.metric_frame,
+            text="Objectif",
+            anchor="w",
+            font=("Segoe UI", 8),
+        )
+        self.metric_label.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.metric_selector = ttk.Combobox(
+            self.metric_frame,
+            textvariable=self.metric_objective,
+            values=Editor.get_metric_names(),
+            state="readonly",
+            width=17,
+        )
+        self.metric_selector.pack(side=tk.LEFT)
+        self.metric_selector.bind("<<ComboboxSelected>>", self.on_metric_objective_changed)
 
         self.editor_tools = tk.Frame(self.editor_header, bd=0, highlightthickness=0)
         self.editor_tools.pack(side=tk.RIGHT, padx=(12, 0))
@@ -640,6 +667,10 @@ class MainWindow(tk.Tk):
 
         return settings if isinstance(settings, dict) else {}
 
+    def get_saved_metric_objective(self) -> str:
+        metric_objective = self.app_settings.get("metric_objective", "Libre")
+        return metric_objective if metric_objective in Editor.get_metric_names() else "Libre"
+
     def save_app_settings(self):
         settings_path = self.get_settings_path()
         os.makedirs(os.path.dirname(settings_path), exist_ok=True)
@@ -648,6 +679,7 @@ class MainWindow(tk.Tk):
             "dark_theme_enabled": self.dark_theme_enabled.get(),
             "current_folder": self.current_folder,
             "current_file": self.editor_core.file_path,
+            "metric_objective": self.metric_objective.get(),
         }
 
         try:
@@ -1344,6 +1376,8 @@ class MainWindow(tk.Tk):
         self.editor_header.configure(bg=theme["surface_bg"])
         self.editor_title_block.configure(bg=theme["surface_bg"])
         self.mode_label.configure(bg=theme["surface_bg"], fg=theme["editor_fg"])
+        self.metric_frame.configure(bg=theme["surface_bg"])
+        self.metric_label.configure(bg=theme["surface_bg"], fg=theme["muted_fg"])
         self.editor_tools.configure(bg=theme["surface_bg"])
         self.hint_label.configure(bg=theme["surface_bg"], fg=theme["muted_fg"])
         self.editor_content.configure(bg=theme["surface_bg"])
@@ -1376,6 +1410,14 @@ class MainWindow(tk.Tk):
             self.folder_tree_style_name,
             background=[("selected", theme["tree_selected_bg"])],
             foreground=[("selected", theme["editor_fg"])],
+        )
+        self.ui_style.configure(
+            "TCombobox",
+            fieldbackground=theme["button_bg"],
+            background=theme["button_bg"],
+            foreground=theme["button_fg"],
+            arrowcolor=theme["muted_fg"],
+            bordercolor=theme["surface_border"],
         )
         self.ui_style.configure(
             self.scrollbar_style_name,
@@ -1449,6 +1491,7 @@ class MainWindow(tk.Tk):
         content = self.get_text_content()
         self.syllable_count_pending = True
         self.syllable_line_counts = []
+        self.syllable_line_targets = []
         self.redraw_syllable_gutter()
 
         thread = threading.Thread(
@@ -1472,19 +1515,50 @@ class MainWindow(tk.Tk):
     def display_syllable_count(self, content: str, total: int, line_counts: list[int]):
         self.syllable_count_pending = False
         self.syllable_line_counts = line_counts
-        self.status_left.configure(text=f"Total: {total} syllabe{'s' if total > 1 else ''}")
+        self.syllable_line_targets = self.editor_core.get_line_metric_targets(
+            self.metric_objective.get(),
+            line_counts,
+        )
+        self.update_syllable_status(total)
         self.redraw_syllable_gutter()
 
     def show_syllable_error(self, error_message: str):
         self.syllable_count_pending = False
         self.syllable_line_counts = []
+        self.syllable_line_targets = []
         self.redraw_syllable_gutter()
         messagebox.showerror("Syllabes", f"Impossible de compter les syllabes: {error_message}", parent=self)
 
     def clear_syllable_counts(self):
         self.syllable_count_pending = False
         self.syllable_line_counts = []
+        self.syllable_line_targets = []
         self.redraw_syllable_gutter()
+
+    def on_metric_objective_changed(self, _event=None):
+        if self.syllable_line_counts:
+            total = sum(self.syllable_line_counts)
+            self.syllable_line_targets = self.editor_core.get_line_metric_targets(
+                self.metric_objective.get(),
+                self.syllable_line_counts,
+            )
+            self.update_syllable_status(total)
+            self.redraw_syllable_gutter()
+
+        self.save_app_settings()
+
+    def update_syllable_status(self, total: int):
+        metric_name = self.metric_objective.get()
+        status = f"Total: {total} syllabe{'s' if total > 1 else ''}"
+
+        if metric_name != "Libre":
+            matching_lines, checked_lines = self.editor_core.summarize_metric_progress(
+                metric_name,
+                self.syllable_line_counts,
+            )
+            status = f"{status}   Objectif {metric_name}: {matching_lines}/{checked_lines} lignes"
+
+        self.status_left.configure(text=status)
 
     def on_editor_navigation(self, _event=None):
         self.update_status()
@@ -1540,13 +1614,18 @@ class MainWindow(tk.Tk):
                 _x, y, _width, height, _baseline = info
                 count = self.syllable_line_counts[line - 1]
                 text = str(count) if count else ""
+                target = self.syllable_line_targets[line - 1] if line <= len(self.syllable_line_targets) else None
+                line_fg = fg
+
+                if target is not None and count:
+                    line_fg = theme["metric_ok_fg"] if count == target else theme["metric_error_fg"]
 
                 if text:
                     self.syllable_gutter.create_text(
                         19,
                         y + height // 2,
                         text=text,
-                        fill=fg,
+                        fill=line_fg,
                         font=("Segoe UI", 9, "bold"),
                     )
 

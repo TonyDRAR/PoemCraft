@@ -8,6 +8,13 @@ VOWELS = "aeiouyàâäéèêëîïôöùûüÿœæ"
 VOWEL_GROUP_RE = re.compile(f"[{VOWELS}]+", re.IGNORECASE)
 WORD_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿœŒæÆ'’-]+")
 ELISION_RE = re.compile(r"^[cdjlmnstqu]'(.+)$", re.IGNORECASE)
+METRIC_RULES = {
+    "Libre": None,
+    "Alexandrin 12": [12],
+    "Decasyllabe 10": [10],
+    "Octosyllabe 8": [8],
+    "Haiku 5/7/5": [5, 7, 5],
+}
 
 
 class Editor:
@@ -42,6 +49,47 @@ class Editor:
     @staticmethod
     def count_line_syllables(text: str) -> list[int]:
         return [Editor.count_verse_syllables(line) for line in text.splitlines()]
+
+    @staticmethod
+    def get_metric_names() -> list[str]:
+        return list(METRIC_RULES.keys())
+
+    @staticmethod
+    def get_line_metric_targets(metric_name: str, line_counts: list[int]) -> list[int | None]:
+        rule = METRIC_RULES.get(metric_name)
+
+        if not rule:
+            return [None for _count in line_counts]
+
+        targets = []
+        verse_index = 0
+
+        for count in line_counts:
+            if count <= 0:
+                targets.append(None)
+                continue
+
+            if len(rule) == 1:
+                targets.append(rule[0])
+                verse_index += 1
+                continue
+
+            targets.append(rule[verse_index] if verse_index < len(rule) else 0)
+            verse_index += 1
+
+        return targets
+
+    @staticmethod
+    def summarize_metric_progress(metric_name: str, line_counts: list[int]) -> tuple[int, int]:
+        targets = Editor.get_line_metric_targets(metric_name, line_counts)
+        checked_lines = [
+            (count, target)
+            for count, target in zip(line_counts, targets)
+            if count > 0 and target is not None
+        ]
+
+        matching_lines = sum(1 for count, target in checked_lines if count == target)
+        return matching_lines, len(checked_lines)
 
     @staticmethod
     def count_verse_syllables(line: str) -> int:
