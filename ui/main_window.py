@@ -130,6 +130,7 @@ class MainWindow(tk.Tk):
         self.resize_margin = 7
         self.folder_tree_style_name = "Poetry.Treeview"
         self.scrollbar_style_name = "Poetry.Vertical.TScrollbar"
+        self.metric_selector_style_name = "Poetry.TCombobox"
         self.ui_style = ttk.Style(self)
 
         try:
@@ -392,6 +393,7 @@ class MainWindow(tk.Tk):
             textvariable=self.metric_objective,
             values=Editor.get_metric_names(),
             state="readonly",
+            style=self.metric_selector_style_name,
             width=17,
         )
         self.metric_selector.pack(side=tk.LEFT)
@@ -1442,12 +1444,35 @@ class MainWindow(tk.Tk):
             foreground=[("selected", theme["editor_fg"])],
         )
         self.ui_style.configure(
-            "TCombobox",
+            self.metric_selector_style_name,
             fieldbackground=theme["button_bg"],
             background=theme["button_bg"],
             foreground=theme["button_fg"],
             arrowcolor=theme["muted_fg"],
             bordercolor=theme["surface_border"],
+            darkcolor=theme["button_bg"],
+            lightcolor=theme["button_bg"],
+            selectbackground=theme["button_active_bg"],
+            selectforeground=theme["button_fg"],
+        )
+        self.ui_style.map(
+            self.metric_selector_style_name,
+            fieldbackground=[
+                ("readonly", theme["button_bg"]),
+                ("disabled", theme["button_bg"]),
+            ],
+            background=[
+                ("readonly", theme["button_bg"]),
+                ("active", theme["button_active_bg"]),
+            ],
+            foreground=[
+                ("readonly", theme["button_fg"]),
+                ("disabled", theme["muted_fg"]),
+            ],
+            arrowcolor=[
+                ("readonly", theme["muted_fg"]),
+                ("active", theme["editor_fg"]),
+            ],
         )
         self.ui_style.configure(
             self.scrollbar_style_name,
