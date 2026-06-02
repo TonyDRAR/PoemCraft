@@ -101,6 +101,7 @@ class MainWindow(tk.Tk):
         self.app_settings = self.load_app_settings()
         self.dark_theme_enabled = tk.BooleanVar(value=bool(self.app_settings.get("dark_theme_enabled", False)))
         self.metric_objective = tk.StringVar(value=self.get_saved_metric_objective())
+        self.analysis_mode = tk.StringVar(value="")
         self.menus = []
         self.toolbar_buttons = []
         self.window_control_buttons = []
@@ -338,8 +339,19 @@ class MainWindow(tk.Tk):
         )
         self.mode_label.pack(anchor="w")
 
+        self.analysis_bar = tk.Frame(self.editor_title_block, bd=0, highlightthickness=0)
+        self.analysis_bar.pack(anchor="w", pady=(8, 0))
+
+        self.analysis_label = tk.Label(
+            self.analysis_bar,
+            text="Analyse",
+            anchor="w",
+            font=("Segoe UI", 8),
+        )
+        self.analysis_label.pack(side=tk.LEFT, padx=(0, 8))
+
         self.syllables_button = tk.Button(
-            self.editor_title_block,
+            self.analysis_bar,
             text="Syllabes",
             command=self.show_syllable_count,
             bd=0,
@@ -348,11 +360,11 @@ class MainWindow(tk.Tk):
             cursor="hand2",
             font=("Segoe UI", 8, "bold"),
         )
-        self.syllables_button.pack(anchor="w", pady=(6, 0))
+        self.syllables_button.pack(side=tk.LEFT)
         self.toolbar_buttons.append(self.syllables_button)
 
         self.rhymes_button = tk.Button(
-            self.editor_title_block,
+            self.analysis_bar,
             text="Rimes",
             command=self.show_rhyme_scheme,
             bd=0,
@@ -361,11 +373,11 @@ class MainWindow(tk.Tk):
             cursor="hand2",
             font=("Segoe UI", 8, "bold"),
         )
-        self.rhymes_button.pack(anchor="w", pady=(6, 0))
+        self.rhymes_button.pack(side=tk.LEFT, padx=(6, 0))
         self.toolbar_buttons.append(self.rhymes_button)
 
-        self.metric_frame = tk.Frame(self.editor_title_block, bd=0, highlightthickness=0)
-        self.metric_frame.pack(anchor="w", pady=(6, 0))
+        self.metric_frame = tk.Frame(self.analysis_bar, bd=0, highlightthickness=0)
+        self.metric_frame.pack(side=tk.LEFT, padx=(14, 0))
 
         self.metric_label = tk.Label(
             self.metric_frame,
@@ -1392,6 +1404,8 @@ class MainWindow(tk.Tk):
         self.editor_header.configure(bg=theme["surface_bg"])
         self.editor_title_block.configure(bg=theme["surface_bg"])
         self.mode_label.configure(bg=theme["surface_bg"], fg=theme["editor_fg"])
+        self.analysis_bar.configure(bg=theme["surface_bg"])
+        self.analysis_label.configure(bg=theme["surface_bg"], fg=theme["muted_fg"])
         self.metric_frame.configure(bg=theme["surface_bg"])
         self.metric_label.configure(bg=theme["surface_bg"], fg=theme["muted_fg"])
         self.editor_tools.configure(bg=theme["surface_bg"])
@@ -1461,6 +1475,8 @@ class MainWindow(tk.Tk):
                 activeforeground=theme["button_fg"],
             )
 
+        self.update_analysis_button_styles(theme)
+
         for index, button in enumerate(self.window_control_buttons):
             active_bg = theme["chrome_close_hover"] if index == 2 else theme["chrome_button_hover"]
             active_fg = "#ffffff" if index == 2 else theme["editor_fg"]
@@ -1505,6 +1521,8 @@ class MainWindow(tk.Tk):
 
     def show_syllable_count(self):
         content = self.get_text_content()
+        self.analysis_mode.set("syllables")
+        self.update_analysis_button_styles()
         self.syllable_count_pending = True
         self.syllable_line_counts = []
         self.syllable_line_targets = []
@@ -1517,6 +1535,26 @@ class MainWindow(tk.Tk):
             daemon=True,
         )
         thread.start()
+
+    def update_analysis_button_styles(self, theme: dict | None = None):
+        if theme is None:
+            theme_name = "dark" if self.dark_theme_enabled.get() else "light"
+            theme = self.THEMES[theme_name]
+
+        active_mode = self.analysis_mode.get()
+        analysis_buttons = (
+            (self.syllables_button, "syllables"),
+            (self.rhymes_button, "rhymes"),
+        )
+
+        for button, mode in analysis_buttons:
+            is_active = active_mode == mode
+            button.configure(
+                bg=theme["button_active_bg"] if is_active else theme["button_bg"],
+                fg=theme["active_fg"] if is_active else theme["button_fg"],
+                activebackground=theme["button_active_bg"],
+                activeforeground=theme["active_fg"],
+            )
 
     def calculate_syllable_count(self, content: str):
         try:
@@ -1547,14 +1585,18 @@ class MainWindow(tk.Tk):
         messagebox.showerror("Syllabes", f"Impossible de compter les syllabes: {error_message}", parent=self)
 
     def clear_syllable_counts(self):
+        self.analysis_mode.set("")
         self.syllable_count_pending = False
         self.syllable_line_counts = []
         self.syllable_line_targets = []
         self.rhyme_line_labels = []
+        self.update_analysis_button_styles()
         self.redraw_syllable_gutter()
 
     def show_rhyme_scheme(self):
         content = self.get_text_content()
+        self.analysis_mode.set("rhymes")
+        self.update_analysis_button_styles()
         self.syllable_count_pending = False
         self.syllable_line_counts = []
         self.syllable_line_targets = []

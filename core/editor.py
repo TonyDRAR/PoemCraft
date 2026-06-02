@@ -8,6 +8,8 @@ VOWELS = "aeiouyàâäéèêëîïôöùûüÿœæ"
 VOWEL_GROUP_RE = re.compile(f"[{VOWELS}]+", re.IGNORECASE)
 WORD_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿœŒæÆ'’-]+")
 ELISION_RE = re.compile(r"^[cdjlmnstqu]'(.+)$", re.IGNORECASE)
+PHONETIC_VOWELS = "aeiouyEO259@§°"
+PHONETIC_VOWEL_RE = re.compile(f"[{PHONETIC_VOWELS}]", re.IGNORECASE)
 METRIC_RULES = {
     "Libre": None,
     "Alexandrin 12": [12],
@@ -128,6 +130,11 @@ class Editor:
 
     @staticmethod
     def get_word_rhyme_key(word: str) -> str:
+        phonetic_key = Editor.get_word_phonetic_rhyme_key(word)
+
+        if phonetic_key:
+            return phonetic_key
+
         word = Editor.remove_accents(Editor.normalize_word(word))
 
         if not word:
@@ -150,6 +157,42 @@ class Editor:
                 start = previous_groups[-1].start()
 
         return word[start:]
+
+    @staticmethod
+    def get_word_phonetic_rhyme_key(word: str) -> str:
+        normalized_word = Editor.normalize_word(word)
+
+        if not normalized_word:
+            return ""
+
+        try:
+            lexicon = Editor.get_lexicon()
+        except Exception:
+            return ""
+
+        entries = lexicon.lexique.get(normalized_word)
+
+        if not entries:
+            entries = lexicon.lexique.get(Editor.remove_accents(normalized_word))
+
+        if not entries:
+            return ""
+
+        if not isinstance(entries, list):
+            entries = [entries]
+
+        phonetic_forms = [entry.phon for entry in entries if getattr(entry, "phon", None)]
+
+        if not phonetic_forms:
+            return ""
+
+        phonetic_form = min(phonetic_forms, key=len)
+        matches = list(PHONETIC_VOWEL_RE.finditer(phonetic_form))
+
+        if not matches:
+            return phonetic_form[-3:]
+
+        return phonetic_form[matches[-1].start():]
 
     @staticmethod
     def build_rhyme_label(index: int) -> str:
@@ -194,7 +237,7 @@ class Editor:
 
     @staticmethod
     def normalize_word(word: str) -> str:
-        word = word.lower().replace("’", "'").strip("-'")
+        word = word.lower().replace("’", "'").replace("â€™", "'").strip("-'")
         match = ELISION_RE.match(word)
 
         if match:
