@@ -174,7 +174,7 @@ class PoemCreationDialog(tk.Toplevel):
         self.poem_types = poem_types
         self.theme = theme
         self.result = None
-        self.title("Add new poem")
+        self.title("Ajouter un poeme")
         self.geometry("760x520")
         self.minsize(640, 440)
         self.transient(parent)
@@ -210,7 +210,7 @@ class PoemCreationDialog(tk.Toplevel):
         self.header = tk.Frame(self.container, bd=0, highlightthickness=0)
         self.header.pack(fill=tk.X)
 
-        self.heading = tk.Label(self.header, text="Add new poem", anchor="w", font=("Segoe UI", 16, "bold"))
+        self.heading = tk.Label(self.header, text="Ajouter un poeme", anchor="w", font=("Segoe UI", 16, "bold"))
         self.heading.pack(anchor="w")
 
         self.subtitle = tk.Label(
@@ -293,7 +293,7 @@ class PoemCreationDialog(tk.Toplevel):
 
         self.create_button = tk.Button(
             self.footer,
-            text="Creer le poeme",
+            text="Ajouter le poeme",
             command=self.create_poem,
             bd=0,
             padx=16,
@@ -302,6 +302,10 @@ class PoemCreationDialog(tk.Toplevel):
             font=("Segoe UI", 9, "bold"),
         )
         self.create_button.pack(side=tk.RIGHT, padx=(0, 8))
+        self.body.pack_forget()
+        self.footer.pack_forget()
+        self.footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(14, 0))
+        self.body.pack(fill=tk.BOTH, expand=True, pady=(18, 0))
 
     def apply_theme(self):
         theme = self.theme
@@ -360,6 +364,13 @@ class PoemCreationDialog(tk.Toplevel):
                 activeforeground=theme["button_fg"],
             )
 
+        self.create_button.configure(
+            bg=theme["select_bg"],
+            fg=theme["select_fg"],
+            activebackground=theme["select_bg"],
+            activeforeground=theme["select_fg"],
+        )
+
     def select_type(self, index: int):
         self.selected_index = index
         poem_type = self.poem_types[index]
@@ -367,9 +378,13 @@ class PoemCreationDialog(tk.Toplevel):
 
         for button_index, button in enumerate(self.type_buttons):
             is_active = button_index == index
-            button.configure(bg=theme["button_active_bg"] if is_active else theme["button_bg"])
+            button.configure(
+                bg=theme["select_bg"] if is_active else theme["button_bg"],
+                fg=theme["select_fg"] if is_active else theme["button_fg"],
+            )
 
         self.rules_text.configure(text=poem_type["rules"])
+        self.create_button.configure(text=f"Ajouter : {poem_type['name']}")
         self.update_field_visibility(poem_type["name"])
         self.update_preview()
 
@@ -452,6 +467,65 @@ def build_poem_draft(poem_type: dict, title: str, refrain_1: str, refrain_2: str
         lines = [line.format(**placeholders) for line in poem_type["lines"]]
 
     return "\n".join([title, poem_type["name"], "", *lines]).rstrip() + "\n"
+
+
+def get_poem_type_by_name(name: str) -> dict | None:
+    normalized_name = name.strip().lower()
+
+    for poem_type in POEM_TYPES:
+        if poem_type["name"].lower() == normalized_name:
+            return poem_type
+
+    return None
+
+
+def detect_poem_type_from_content(content: str) -> dict | None:
+    lines = content.splitlines()
+
+    if len(lines) < 2:
+        return None
+
+    return get_poem_type_by_name(lines[1])
+
+
+def is_structure_heading(line: str) -> bool:
+    normalized_line = line.strip().lower()
+    return normalized_line in {"situation", "peripetie", "denouement", "envoi"} or normalized_line.startswith("strophe ")
+
+
+def get_poem_body_lines(content: str, poem_type: dict) -> list[str]:
+    lines = content.splitlines()
+
+    if len(lines) >= 2 and lines[1].strip().lower() == poem_type["name"].lower():
+        return lines[3:] if len(lines) >= 3 and not lines[2].strip() else lines[2:]
+
+    return lines
+
+
+def build_editor_structure_text(poem_type: dict, content: str) -> str:
+    body_lines = get_poem_body_lines(content, poem_type)
+    display_lines = []
+    verse_index = 0
+
+    for line in body_lines:
+        stripped_line = line.strip()
+
+        if not stripped_line:
+            if display_lines and display_lines[-1]:
+                display_lines.append("")
+            continue
+
+        if is_structure_heading(stripped_line):
+            display_lines.append(stripped_line.upper())
+            continue
+
+        verse_index += 1
+        display_lines.append(f"{verse_index:02d}  {stripped_line}")
+
+    if not display_lines:
+        display_lines.append("La structure apparaitra ici des que le poeme contient des lignes.")
+
+    return "\n".join(display_lines).strip()
 
 
 def slugify_filename(name: str) -> str:
@@ -558,6 +632,7 @@ class MainWindow(tk.Tk):
         self.syllable_count_pending = False
         self.current_folder = None
         self.current_image_path = None
+        self.current_poem_type = None
         self.image_preview = None
         self.image_generation_pending = False
         self.image_generation_id = 0
@@ -680,7 +755,7 @@ class MainWindow(tk.Tk):
         self.file_label.pack(anchor="w", pady=(2, 0))
 
         actions = [
-            ("Add new poem", self.add_new_poem),
+            ("Ajouter un poeme", self.add_new_poem),
             ("Nouveau", self.new_file),
             ("Ouvrir", self.open_file),
             ("Sauver", self.save_file),
@@ -883,6 +958,91 @@ class MainWindow(tk.Tk):
         self.editor_body = tk.Frame(self.editor_content, bd=0, highlightthickness=0)
         self.editor_body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        self.structure_panel = tk.Frame(self.editor_content, bd=0, highlightthickness=1, width=280)
+        self.structure_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(18, 0))
+        self.structure_panel.pack_propagate(False)
+
+        self.structure_header = tk.Frame(self.structure_panel, bd=0, highlightthickness=0)
+        self.structure_header.pack(fill=tk.X, padx=14, pady=(14, 6))
+
+        self.structure_title = tk.Label(
+            self.structure_header,
+            text="Structure",
+            anchor="w",
+            font=("Segoe UI", 10, "bold"),
+        )
+        self.structure_title.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.hide_structure_button = tk.Button(
+            self.structure_header,
+            text="Masquer",
+            command=self.hide_poem_structure,
+            bd=0,
+            padx=8,
+            pady=5,
+            cursor="hand2",
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.hide_structure_button.pack(side=tk.RIGHT)
+        self.toolbar_buttons.append(self.hide_structure_button)
+
+        self.structure_type_label = tk.Label(
+            self.structure_panel,
+            text="",
+            anchor="w",
+            font=("Segoe UI", 12, "bold"),
+        )
+        self.structure_type_label.pack(fill=tk.X, padx=14, pady=(2, 0))
+
+        self.structure_metric_label = tk.Label(
+            self.structure_panel,
+            text="",
+            anchor="w",
+            font=("Segoe UI", 9),
+        )
+        self.structure_metric_label.pack(fill=tk.X, padx=14, pady=(4, 0))
+
+        self.structure_rules_text = tk.Message(
+            self.structure_panel,
+            text="",
+            anchor="nw",
+            font=("Segoe UI", 9),
+            width=245,
+        )
+        self.structure_rules_text.pack(fill=tk.X, padx=14, pady=(12, 0))
+
+        self.structure_list_label = tk.Label(
+            self.structure_panel,
+            text="Plan du brouillon",
+            anchor="w",
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.structure_list_label.pack(fill=tk.X, padx=14, pady=(16, 6))
+
+        self.structure_text_frame = tk.Frame(self.structure_panel, bd=0, highlightthickness=0)
+        self.structure_text_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
+
+        self.structure_text = tk.Text(
+            self.structure_text_frame,
+            bd=0,
+            padx=10,
+            pady=10,
+            font=("Consolas", 9),
+            wrap=tk.WORD,
+        )
+        self.structure_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.structure_text.configure(state=tk.DISABLED)
+
+        self.structure_scrollbar = ttk.Scrollbar(
+            self.structure_text_frame,
+            orient=tk.VERTICAL,
+            style=self.scrollbar_style_name,
+        )
+        self.structure_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.structure_text.configure(yscrollcommand=self.structure_scrollbar.set)
+        self.structure_scrollbar.configure(command=self.structure_text.yview)
+        self.structure_panel.pack_forget()
+
         self.image_panel = tk.Frame(self.editor_content, bd=0, highlightthickness=0, width=340)
         self.image_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(18, 0))
         self.image_panel.pack_propagate(False)
@@ -960,7 +1120,7 @@ class MainWindow(tk.Tk):
     def create_context_menus(self):
         self.explorer_context_menu = tk.Menu(self, tearoff=False)
         self.menus.append(self.explorer_context_menu)
-        self.explorer_context_menu.add_command(label="Add new poem", command=self.create_poem_from_explorer)
+        self.explorer_context_menu.add_command(label="Ajouter un poeme", command=self.create_poem_from_explorer)
         self.explorer_context_menu.add_command(label="Nouveau texte", command=self.create_text_from_explorer)
         self.explorer_context_menu.add_command(label="Nouveau dossier", command=self.create_folder_from_explorer)
         self.explorer_context_menu.add_separator()
@@ -1184,6 +1344,7 @@ class MainWindow(tk.Tk):
             self.text_edit.edit_modified(False)
             self.editor_core = Editor()
             self.clear_current_image()
+            self.clear_poem_structure()
             self.clear_syllable_counts()
             self.update_window_title()
             self.update_status()
@@ -1208,14 +1369,64 @@ class MainWindow(tk.Tk):
         self.editor_core.mark_modified()
         self.metric_objective.set(poem_type.get("metric", "Libre"))
         self.clear_current_image()
+        self.display_poem_structure(poem_type, content)
         self.clear_syllable_counts()
         self.update_window_title()
         self.update_status()
+        self.focus_editor_after_poem_creation()
         self.save_app_settings()
 
     def open_poem_creation_dialog(self) -> PoemCreationDialog:
         theme_name = "dark" if self.dark_theme_enabled.get() else "light"
         return PoemCreationDialog(self, POEM_TYPES, self.THEMES[theme_name])
+
+    def focus_editor_after_poem_creation(self):
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+        self.text_edit.focus_set()
+        self.text_edit.mark_set(tk.INSERT, "end-1c")
+        self.text_edit.see(tk.INSERT)
+
+    def display_poem_structure(self, poem_type: dict, content: str):
+        self.current_poem_type = poem_type
+        self.structure_type_label.configure(text=poem_type["name"])
+        self.structure_metric_label.configure(text=f"Objectif : {poem_type.get('metric', 'Libre')}")
+        self.structure_rules_text.configure(text=poem_type["rules"])
+        self.refresh_poem_structure_text(content)
+
+        if not self.structure_panel.winfo_ismapped():
+            self.structure_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(18, 0))
+
+    def refresh_poem_structure_text(self, content: str | None = None):
+        if not self.current_poem_type:
+            return
+
+        content = self.get_text_content() if content is None else content
+        structure_text = build_editor_structure_text(self.current_poem_type, content)
+        self.structure_text.configure(state=tk.NORMAL)
+        self.structure_text.delete("1.0", tk.END)
+        self.structure_text.insert("1.0", structure_text)
+        self.structure_text.configure(state=tk.DISABLED)
+
+    def update_poem_structure_from_content(self, content: str):
+        poem_type = detect_poem_type_from_content(content)
+
+        if poem_type:
+            self.display_poem_structure(poem_type, content)
+            return
+
+        self.clear_poem_structure()
+
+    def hide_poem_structure(self):
+        self.structure_panel.pack_forget()
+
+    def clear_poem_structure(self):
+        self.current_poem_type = None
+        self.structure_text.configure(state=tk.NORMAL)
+        self.structure_text.delete("1.0", tk.END)
+        self.structure_text.configure(state=tk.DISABLED)
+        self.structure_panel.pack_forget()
 
     def open_file(self):
         if not self.confirm_unsaved_changes():
@@ -1350,12 +1561,13 @@ class MainWindow(tk.Tk):
         success = self.file_service.write(path, dialog.result["content"])
 
         if not success:
-            messagebox.showerror("Add new poem", "Impossible de creer le poeme.", parent=self)
+            messagebox.showerror("Ajouter un poeme", "Impossible de creer le poeme.", parent=self)
             return
 
         self.refresh_folder_tree(path)
         self.load_file(path)
         self.metric_objective.set(dialog.result["poem_type"].get("metric", "Libre"))
+        self.focus_editor_after_poem_creation()
         self.save_app_settings()
 
     def create_folder_from_explorer(self):
@@ -1428,6 +1640,7 @@ class MainWindow(tk.Tk):
             self.text_edit.delete("1.0", tk.END)
             self.text_edit.edit_modified(False)
             self.editor_core = Editor()
+            self.clear_poem_structure()
             self.clear_syllable_counts()
             self.update_window_title()
             self.update_status()
@@ -1860,6 +2073,7 @@ class MainWindow(tk.Tk):
         self.text_edit.insert("1.0", content)
         self.text_edit.edit_modified(False)
         self.load_associated_image()
+        self.update_poem_structure_from_content(content)
         self.clear_syllable_counts()
         self.update_window_title()
         self.update_status()
@@ -1871,6 +2085,7 @@ class MainWindow(tk.Tk):
         if self.text_edit.edit_modified():
             self.editor_core.mark_modified()
             self.clear_syllable_counts()
+            self.refresh_poem_structure_text()
             self.update_window_title()
             self.update_status()
             self.text_edit.edit_modified(False)
@@ -1921,6 +2136,25 @@ class MainWindow(tk.Tk):
         self.hint_label.configure(bg=theme["surface_bg"], fg=theme["muted_fg"])
         self.editor_content.configure(bg=theme["surface_bg"])
         self.editor_body.configure(bg=theme["surface_bg"])
+        self.structure_panel.configure(
+            bg=theme["toolbar_bg"],
+            highlightbackground=theme["surface_border"],
+            highlightcolor=theme["surface_border"],
+        )
+        self.structure_header.configure(bg=theme["toolbar_bg"])
+        self.structure_title.configure(bg=theme["toolbar_bg"], fg=theme["editor_fg"])
+        self.structure_type_label.configure(bg=theme["toolbar_bg"], fg=theme["editor_fg"])
+        self.structure_metric_label.configure(bg=theme["toolbar_bg"], fg=theme["muted_fg"])
+        self.structure_rules_text.configure(bg=theme["toolbar_bg"], fg=theme["muted_fg"])
+        self.structure_list_label.configure(bg=theme["toolbar_bg"], fg=theme["editor_fg"])
+        self.structure_text_frame.configure(bg=theme["editor_bg"])
+        self.structure_text.configure(
+            bg=theme["editor_bg"],
+            fg=theme["editor_fg"],
+            insertbackground=theme["insert_bg"],
+            selectbackground=theme["select_bg"],
+            selectforeground=theme["select_fg"],
+        )
         self.image_panel.configure(bg=theme["surface_bg"])
         self.image_preview_label.configure(bg=theme["surface_bg"])
         self.status_bar.configure(bg=theme["window_bg"])
