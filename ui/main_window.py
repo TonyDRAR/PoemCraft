@@ -14,6 +14,452 @@ from services.file_service import FileService
 from services.pollinations_service import PollinationsService
 
 
+POEM_TYPES = [
+    {
+        "name": "Sonnet",
+        "rules": "14 vers : 2 quatrains + 2 tercets. Souvent en alexandrins. Rimes ABBA ABBA CCD EDE ou variante proche.",
+        "metric": "Alexandrin 12",
+        "lines": [
+            "[A] Premier vers du premier quatrain",
+            "[B] Deuxieme vers du premier quatrain",
+            "[B] Troisieme vers du premier quatrain",
+            "[A] Quatrieme vers du premier quatrain",
+            "",
+            "[A] Premier vers du second quatrain",
+            "[B] Deuxieme vers du second quatrain",
+            "[B] Troisieme vers du second quatrain",
+            "[A] Quatrieme vers du second quatrain",
+            "",
+            "[C] Premier vers du premier tercet",
+            "[C] Deuxieme vers du premier tercet",
+            "[D] Troisieme vers du premier tercet",
+            "",
+            "[E] Premier vers du second tercet",
+            "[D] Deuxieme vers du second tercet",
+            "[E] Troisieme vers du second tercet",
+        ],
+    },
+    {
+        "name": "Ballade",
+        "rules": "3 strophes de meme longueur + un envoi final plus court. Meme refrain a la fin de chaque strophe.",
+        "metric": "Octosyllabe 8",
+        "lines": [
+            "Strophe 1",
+            "Vers 1",
+            "Vers 2",
+            "Vers 3",
+            "{refrain_1}",
+            "",
+            "Strophe 2",
+            "Vers 1",
+            "Vers 2",
+            "Vers 3",
+            "{refrain_1}",
+            "",
+            "Strophe 3",
+            "Vers 1",
+            "Vers 2",
+            "Vers 3",
+            "{refrain_1}",
+            "",
+            "Envoi",
+            "Vers 1",
+            "Vers 2",
+            "{refrain_1}",
+        ],
+    },
+    {
+        "name": "Rondeau",
+        "rules": "Forme fixe, souvent 13 ou 15 vers, avec repetition partielle du premier vers comme refrain.",
+        "metric": "Octosyllabe 8",
+        "lines": [
+            "Premier vers / refrain",
+            "Vers 2",
+            "Vers 3",
+            "Vers 4",
+            "Vers 5",
+            "",
+            "Refrain : {refrain_1}",
+            "Vers 6",
+            "Vers 7",
+            "Vers 8",
+            "",
+            "Vers 9",
+            "Vers 10",
+            "Vers 11",
+            "Vers 12",
+            "Refrain : {refrain_1}",
+        ],
+    },
+    {
+        "name": "Villanelle",
+        "rules": "19 vers : 5 tercets + 1 quatrain. Deux refrains alternes reviennent selon un schema precis.",
+        "metric": "Libre",
+        "lines": [
+            "{refrain_1}",
+            "Vers 2",
+            "{refrain_2}",
+            "",
+            "Vers 4",
+            "Vers 5",
+            "{refrain_1}",
+            "",
+            "Vers 7",
+            "Vers 8",
+            "{refrain_2}",
+            "",
+            "Vers 10",
+            "Vers 11",
+            "{refrain_1}",
+            "",
+            "Vers 13",
+            "Vers 14",
+            "{refrain_2}",
+            "",
+            "Vers 16",
+            "Vers 17",
+            "{refrain_1}",
+            "{refrain_2}",
+        ],
+    },
+    {
+        "name": "Ode",
+        "rules": "Poeme lyrique celebrant une personne, une idee ou un evenement. Forme variable mais ton eleve.",
+        "metric": "Libre",
+        "lines": ["Strophe 1", "", "Strophe 2", "", "Strophe 3"],
+    },
+    {
+        "name": "Elegie",
+        "rules": "Poeme exprimant la tristesse, le regret ou le deuil. Forme libre.",
+        "metric": "Libre",
+        "lines": ["Strophe 1", "", "Strophe 2", "", "Strophe 3"],
+    },
+    {
+        "name": "Fable",
+        "rules": "Recit en vers ou en prose comportant une morale. Souvent avec des personnages personnifies.",
+        "metric": "Libre",
+        "lines": ["Situation", "", "Peripetie", "", "Denouement", "", "Morale : {morale}"],
+    },
+    {
+        "name": "Poeme en vers libres",
+        "rules": "Pas de nombre fixe de syllabes, ni de schema de rimes obligatoire. Grande liberte formelle.",
+        "metric": "Libre",
+        "lines": ["Vers 1", "Vers 2", "Vers 3"],
+    },
+    {
+        "name": "Poeme en prose",
+        "rules": "Ecrit en paragraphes et non en vers, avec images, rythme et musicalite.",
+        "metric": "Libre",
+        "lines": ["Premier paragraphe.", "", "Deuxieme paragraphe."],
+    },
+    {
+        "name": "Haiku",
+        "rules": "3 vers. Traditionnellement 5-7-5 syllabes. Evoque souvent la nature et un instant fugace.",
+        "metric": "Haiku 5/7/5",
+        "lines": ["[5] Premier vers", "[7] Deuxieme vers", "[5] Troisieme vers"],
+    },
+    {
+        "name": "Acrostiche",
+        "rules": "Les premieres lettres des vers forment un mot ou une phrase lorsqu'on les lit verticalement.",
+        "metric": "Libre",
+        "lines": [],
+    },
+]
+
+
+class PoemCreationDialog(tk.Toplevel):
+    def __init__(self, parent, poem_types: list[dict], theme: dict):
+        super().__init__(parent)
+        self.parent = parent
+        self.poem_types = poem_types
+        self.theme = theme
+        self.result = None
+        self.title("Add new poem")
+        self.geometry("760x520")
+        self.minsize(640, 440)
+        self.transient(parent)
+        self.grab_set()
+
+        self.title_var = tk.StringVar(value="Nouveau poeme")
+        self.refrain_1_var = tk.StringVar(value="Refrain principal")
+        self.refrain_2_var = tk.StringVar(value="Second refrain")
+        self.acrostic_var = tk.StringVar(value="POEME")
+        self.morale_var = tk.StringVar(value="Morale a formuler")
+        self.selected_index = 0
+        self.type_buttons = []
+
+        self.create_widgets()
+        for variable in (
+            self.title_var,
+            self.refrain_1_var,
+            self.refrain_2_var,
+            self.acrostic_var,
+            self.morale_var,
+        ):
+            variable.trace_add("write", self.update_preview)
+        self.apply_theme()
+        self.select_type(0)
+        self.bind("<Escape>", lambda _event: self.cancel())
+        self.bind("<Return>", lambda _event: self.create_poem())
+        self.wait_window()
+
+    def create_widgets(self):
+        self.container = tk.Frame(self, bd=0, highlightthickness=0)
+        self.container.pack(fill=tk.BOTH, expand=True, padx=22, pady=20)
+
+        self.header = tk.Frame(self.container, bd=0, highlightthickness=0)
+        self.header.pack(fill=tk.X)
+
+        self.heading = tk.Label(self.header, text="Add new poem", anchor="w", font=("Segoe UI", 16, "bold"))
+        self.heading.pack(anchor="w")
+
+        self.subtitle = tk.Label(
+            self.header,
+            text="Choisissez une forme, renseignez les champs utiles, puis creez un brouillon structure.",
+            anchor="w",
+            font=("Segoe UI", 9),
+        )
+        self.subtitle.pack(anchor="w", pady=(4, 0))
+
+        self.body = tk.Frame(self.container, bd=0, highlightthickness=0)
+        self.body.pack(fill=tk.BOTH, expand=True, pady=(18, 0))
+
+        self.type_list = tk.Frame(self.body, bd=0, highlightthickness=1, width=230)
+        self.type_list.pack(side=tk.LEFT, fill=tk.Y)
+        self.type_list.pack_propagate(False)
+
+        for index, poem_type in enumerate(self.poem_types):
+            button = tk.Button(
+                self.type_list,
+                text=poem_type["name"],
+                command=lambda selected=index: self.select_type(selected),
+                anchor="w",
+                bd=0,
+                padx=12,
+                pady=8,
+                cursor="hand2",
+                font=("Segoe UI", 9, "bold"),
+            )
+            button.pack(fill=tk.X)
+            self.type_buttons.append(button)
+
+        self.details = tk.Frame(self.body, bd=0, highlightthickness=1)
+        self.details.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(16, 0))
+
+        self.form = tk.Frame(self.details, bd=0, highlightthickness=0)
+        self.form.pack(fill=tk.X, padx=18, pady=18)
+
+        self.title_label = tk.Label(self.form, text="Titre", anchor="w", font=("Segoe UI", 9, "bold"))
+        self.title_label.pack(anchor="w")
+        self.title_entry = tk.Entry(self.form, textvariable=self.title_var, bd=0, font=("Segoe UI", 10))
+        self.title_entry.pack(fill=tk.X, pady=(5, 12), ipady=8)
+
+        self.refrain_1_label = tk.Label(self.form, text="Refrain principal", anchor="w", font=("Segoe UI", 9, "bold"))
+        self.refrain_1_entry = tk.Entry(self.form, textvariable=self.refrain_1_var, bd=0, font=("Segoe UI", 10))
+        self.refrain_2_label = tk.Label(self.form, text="Second refrain", anchor="w", font=("Segoe UI", 9, "bold"))
+        self.refrain_2_entry = tk.Entry(self.form, textvariable=self.refrain_2_var, bd=0, font=("Segoe UI", 10))
+        self.acrostic_label = tk.Label(self.form, text="Mot de l'acrostiche", anchor="w", font=("Segoe UI", 9, "bold"))
+        self.acrostic_entry = tk.Entry(self.form, textvariable=self.acrostic_var, bd=0, font=("Segoe UI", 10))
+        self.morale_label = tk.Label(self.form, text="Morale", anchor="w", font=("Segoe UI", 9, "bold"))
+        self.morale_entry = tk.Entry(self.form, textvariable=self.morale_var, bd=0, font=("Segoe UI", 10))
+
+        self.rules_label = tk.Label(self.details, text="Regles principales", anchor="w", font=("Segoe UI", 10, "bold"))
+        self.rules_label.pack(anchor="w", padx=18, pady=(6, 0))
+
+        self.rules_text = tk.Message(self.details, text="", anchor="nw", font=("Segoe UI", 10), width=420)
+        self.rules_text.pack(fill=tk.X, padx=18, pady=(8, 0))
+
+        self.preview_label = tk.Label(self.details, text="Structure generee", anchor="w", font=("Segoe UI", 10, "bold"))
+        self.preview_label.pack(anchor="w", padx=18, pady=(18, 0))
+
+        self.preview = tk.Text(self.details, height=8, bd=0, padx=12, pady=10, font=("Consolas", 9), wrap=tk.WORD)
+        self.preview.pack(fill=tk.BOTH, expand=True, padx=18, pady=(8, 18))
+        self.preview.configure(state=tk.DISABLED)
+
+        self.footer = tk.Frame(self.container, bd=0, highlightthickness=0)
+        self.footer.pack(fill=tk.X, pady=(18, 0))
+
+        self.cancel_button = tk.Button(
+            self.footer,
+            text="Annuler",
+            command=self.cancel,
+            bd=0,
+            padx=16,
+            pady=9,
+            cursor="hand2",
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.cancel_button.pack(side=tk.RIGHT)
+
+        self.create_button = tk.Button(
+            self.footer,
+            text="Creer le poeme",
+            command=self.create_poem,
+            bd=0,
+            padx=16,
+            pady=9,
+            cursor="hand2",
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.create_button.pack(side=tk.RIGHT, padx=(0, 8))
+
+    def apply_theme(self):
+        theme = self.theme
+        self.configure(bg=theme["window_bg"])
+
+        for frame in (self.container, self.header, self.body, self.footer):
+            frame.configure(bg=theme["window_bg"])
+
+        for frame in (self.type_list, self.details):
+            frame.configure(
+                bg=theme["surface_bg"],
+                highlightbackground=theme["surface_border"],
+                highlightcolor=theme["surface_border"],
+            )
+
+        self.form.configure(bg=theme["surface_bg"])
+
+        labels = (
+            self.heading,
+            self.title_label,
+            self.refrain_1_label,
+            self.refrain_2_label,
+            self.acrostic_label,
+            self.morale_label,
+            self.rules_label,
+            self.preview_label,
+        )
+        for label in labels:
+            label.configure(bg=theme["window_bg"] if label in (self.heading,) else theme["surface_bg"], fg=theme["editor_fg"])
+
+        self.subtitle.configure(bg=theme["window_bg"], fg=theme["muted_fg"])
+        self.rules_text.configure(bg=theme["surface_bg"], fg=theme["muted_fg"])
+        self.preview.configure(bg=theme["editor_bg"], fg=theme["editor_fg"], insertbackground=theme["insert_bg"])
+
+        for entry in (
+            self.title_entry,
+            self.refrain_1_entry,
+            self.refrain_2_entry,
+            self.acrostic_entry,
+            self.morale_entry,
+        ):
+            entry.configure(
+                bg=theme["editor_bg"],
+                fg=theme["editor_fg"],
+                insertbackground=theme["insert_bg"],
+                highlightthickness=1,
+                highlightbackground=theme["surface_border"],
+                highlightcolor=theme["select_bg"],
+            )
+
+        for button in self.type_buttons + [self.cancel_button, self.create_button]:
+            button.configure(
+                bg=theme["button_bg"],
+                fg=theme["button_fg"],
+                activebackground=theme["button_active_bg"],
+                activeforeground=theme["button_fg"],
+            )
+
+    def select_type(self, index: int):
+        self.selected_index = index
+        poem_type = self.poem_types[index]
+        theme = self.theme
+
+        for button_index, button in enumerate(self.type_buttons):
+            is_active = button_index == index
+            button.configure(bg=theme["button_active_bg"] if is_active else theme["button_bg"])
+
+        self.rules_text.configure(text=poem_type["rules"])
+        self.update_field_visibility(poem_type["name"])
+        self.update_preview()
+
+    def update_field_visibility(self, poem_name: str):
+        optional_fields = (
+            self.refrain_1_label,
+            self.refrain_1_entry,
+            self.refrain_2_label,
+            self.refrain_2_entry,
+            self.acrostic_label,
+            self.acrostic_entry,
+            self.morale_label,
+            self.morale_entry,
+        )
+
+        for widget in optional_fields:
+            widget.pack_forget()
+
+        if poem_name in ("Ballade", "Rondeau", "Villanelle"):
+            self.refrain_1_label.pack(anchor="w")
+            self.refrain_1_entry.pack(fill=tk.X, pady=(5, 12), ipady=8)
+
+        if poem_name == "Villanelle":
+            self.refrain_2_label.pack(anchor="w")
+            self.refrain_2_entry.pack(fill=tk.X, pady=(5, 12), ipady=8)
+
+        if poem_name == "Acrostiche":
+            self.acrostic_label.pack(anchor="w")
+            self.acrostic_entry.pack(fill=tk.X, pady=(5, 12), ipady=8)
+
+        if poem_name == "Fable":
+            self.morale_label.pack(anchor="w")
+            self.morale_entry.pack(fill=tk.X, pady=(5, 12), ipady=8)
+
+    def build_preview_content(self) -> str:
+        poem_type = self.poem_types[self.selected_index]
+        return build_poem_draft(
+            poem_type,
+            self.title_var.get(),
+            self.refrain_1_var.get(),
+            self.refrain_2_var.get(),
+            self.acrostic_var.get(),
+            self.morale_var.get(),
+        )
+
+    def update_preview(self, *_args):
+        content = self.build_preview_content()
+        self.preview.configure(state=tk.NORMAL)
+        self.preview.delete("1.0", tk.END)
+        self.preview.insert("1.0", content)
+        self.preview.configure(state=tk.DISABLED)
+
+    def create_poem(self):
+        self.result = {
+            "poem_type": self.poem_types[self.selected_index],
+            "title": self.title_var.get().strip() or self.poem_types[self.selected_index]["name"],
+            "content": self.build_preview_content(),
+        }
+        self.destroy()
+
+    def cancel(self):
+        self.result = None
+        self.destroy()
+
+
+def build_poem_draft(poem_type: dict, title: str, refrain_1: str, refrain_2: str, acrostic: str, morale: str) -> str:
+    title = title.strip() or poem_type["name"]
+    placeholders = {
+        "refrain_1": refrain_1.strip() or "Refrain principal",
+        "refrain_2": refrain_2.strip() or "Second refrain",
+        "morale": morale.strip() or "Morale a formuler",
+    }
+
+    if poem_type["name"] == "Acrostiche":
+        letters = [character.upper() for character in acrostic.strip() if character.strip()]
+        if not letters:
+            letters = list("POEME")
+        lines = [f"{letter}..." for letter in letters]
+    else:
+        lines = [line.format(**placeholders) for line in poem_type["lines"]]
+
+    return "\n".join([title, poem_type["name"], "", *lines]).rstrip() + "\n"
+
+
+def slugify_filename(name: str) -> str:
+    normalized = "".join(character if character.isalnum() else "_" for character in name.strip().lower())
+    normalized = "_".join(part for part in normalized.split("_") if part)
+    return normalized or "nouveau_poeme"
+
+
 class MainWindow(tk.Tk):
     THEMES = {
         "light": {
@@ -234,6 +680,7 @@ class MainWindow(tk.Tk):
         self.file_label.pack(anchor="w", pady=(2, 0))
 
         actions = [
+            ("Add new poem", self.add_new_poem),
             ("Nouveau", self.new_file),
             ("Ouvrir", self.open_file),
             ("Sauver", self.save_file),
@@ -513,6 +960,7 @@ class MainWindow(tk.Tk):
     def create_context_menus(self):
         self.explorer_context_menu = tk.Menu(self, tearoff=False)
         self.menus.append(self.explorer_context_menu)
+        self.explorer_context_menu.add_command(label="Add new poem", command=self.create_poem_from_explorer)
         self.explorer_context_menu.add_command(label="Nouveau texte", command=self.create_text_from_explorer)
         self.explorer_context_menu.add_command(label="Nouveau dossier", command=self.create_folder_from_explorer)
         self.explorer_context_menu.add_separator()
@@ -570,7 +1018,7 @@ class MainWindow(tk.Tk):
             self.resize_grips.append(grip)
 
     def bind_shortcuts(self):
-        self.bind("<Control-n>", lambda _event: self.new_file())
+        self.bind("<Control-n>", lambda _event: self.add_new_poem())
         self.bind("<Control-o>", lambda _event: self.open_file())
         self.bind("<Control-s>", lambda _event: self.save_file())
         self.bind("<Control-k>", lambda _event: self.open_folder())
@@ -741,6 +1189,34 @@ class MainWindow(tk.Tk):
             self.update_status()
             self.save_app_settings()
 
+    def add_new_poem(self):
+        if not self.confirm_unsaved_changes():
+            return
+
+        dialog = self.open_poem_creation_dialog()
+
+        if not dialog.result:
+            return
+
+        content = dialog.result["content"]
+        poem_type = dialog.result["poem_type"]
+        self.text_edit.delete("1.0", tk.END)
+        self.text_edit.insert("1.0", content)
+        self.text_edit.edit_modified(False)
+        self.editor_core = Editor()
+        self.editor_core.set_content(content)
+        self.editor_core.mark_modified()
+        self.metric_objective.set(poem_type.get("metric", "Libre"))
+        self.clear_current_image()
+        self.clear_syllable_counts()
+        self.update_window_title()
+        self.update_status()
+        self.save_app_settings()
+
+    def open_poem_creation_dialog(self) -> PoemCreationDialog:
+        theme_name = "dark" if self.dark_theme_enabled.get() else "light"
+        return PoemCreationDialog(self, POEM_TYPES, self.THEMES[theme_name])
+
     def open_file(self):
         if not self.confirm_unsaved_changes():
             return
@@ -850,6 +1326,37 @@ class MainWindow(tk.Tk):
 
         self.refresh_folder_tree(path)
         self.load_file(path)
+
+    def create_poem_from_explorer(self):
+        target_folder = self.get_explorer_target_folder()
+
+        if not target_folder:
+            messagebox.showinfo("Explorateur", "Ouvrez un dossier avant de creer un poeme.", parent=self)
+            return
+
+        dialog = self.open_poem_creation_dialog()
+
+        if not dialog.result:
+            return
+
+        filename = f"{slugify_filename(dialog.result['title'])}.txt"
+        path = os.path.join(target_folder, filename)
+        suffix = 2
+
+        while os.path.exists(path):
+            path = os.path.join(target_folder, f"{slugify_filename(dialog.result['title'])}_{suffix}.txt")
+            suffix += 1
+
+        success = self.file_service.write(path, dialog.result["content"])
+
+        if not success:
+            messagebox.showerror("Add new poem", "Impossible de creer le poeme.", parent=self)
+            return
+
+        self.refresh_folder_tree(path)
+        self.load_file(path)
+        self.metric_objective.set(dialog.result["poem_type"].get("metric", "Libre"))
+        self.save_app_settings()
 
     def create_folder_from_explorer(self):
         target_folder = self.get_explorer_target_folder()
